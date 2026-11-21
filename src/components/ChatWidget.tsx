@@ -9,6 +9,12 @@ async function openConversation(): Promise<ChatMessage[]> {
   return ((await response.json()) as { messages: ChatMessage[] }).messages;
 }
 
+/** The payload of a `safety_script` message (see src/server/agent/safety-scripts.ts). */
+function isSafetyScript(payload: unknown): payload is { title: string; bullets: string[] } {
+  const p = payload as { title?: unknown; bullets?: unknown } | null;
+  return typeof p?.title === "string" && Array.isArray(p.bullets);
+}
+
 async function postMessage(text: string): Promise<Response> {
   return fetch("/api/conversation/messages", {
     method: "POST",
@@ -81,11 +87,22 @@ export function ChatWidget({ sessionId }: { sessionId: string | null }) {
         {messages.length === 0 && !pending && (
           <p className="muted">Ask about prices, check we cover your postcode, or tell us what's wrong.</p>
         )}
-        {messages.map((m) => (
-          <p key={m.id} className={`bubble bubble--${m.speaker === "Customer" ? "customer" : "agent"} bubble--${m.kind}`}>
-            {m.text}
-          </p>
-        ))}
+        {messages.map((m) =>
+          m.kind === "safety_script" && isSafetyScript(m.payload) ? (
+            <div key={m.id} className="bubble bubble--agent bubble--safety_script" role="alert">
+              <p className="safety__title">{m.payload.title}</p>
+              <ul className="safety__bullets">
+                {m.payload.bullets.map((b) => (
+                  <li key={b}>{b}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p key={m.id} className={`bubble bubble--${m.speaker === "Customer" ? "customer" : "agent"} bubble--${m.kind}`}>
+              {m.text}
+            </p>
+          ),
+        )}
         {pending && (
           <>
             <p className="bubble bubble--customer">{pending}</p>
