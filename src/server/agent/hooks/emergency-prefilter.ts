@@ -1,4 +1,5 @@
 import { detectEmergency, type EmergencyKind } from "@/domain/emergency-prefilter";
+import { getVerification } from "@/server/verification";
 import { raiseHandoffTicket } from "../handoff-tickets";
 import { SAFETY_SCRIPTS, safetyScriptText } from "../safety-scripts";
 import type { PreModelHook } from "../types";
@@ -29,7 +30,10 @@ export const emergencyPrefilter: PreModelHook = async (ctx) => {
   const kind = detected.match;
   const script = SAFETY_SCRIPTS[kind];
   const quoted = ctx.customerMessage.text.slice(0, QUOTE_LIMIT);
+  // The Customer details known so far: whoever this conversation is verified as.
+  const { verifiedCustomerId } = await getVerification(ctx.db, ctx);
   const ticket = await raiseHandoffTicket(ctx.db, {
+    customerId: verifiedCustomerId,
     sessionId: ctx.sessionId,
     conversationId: ctx.conversationId,
     reason: "Emergency",

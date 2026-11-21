@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHarness, london } from "@/server/testing/harness";
-import { ScriptedModelClient, reply, text } from "@/server/testing/scripted-model-client";
+import { ScriptedModelClient, reply, text, toolCall } from "@/server/testing/scripted-model-client";
 
 const WEDNESDAY = london("2026-11-18T11:30");
 
@@ -99,6 +99,25 @@ describe("Emergency pre-filter → Safety Script → Critical Handoff Ticket", (
     await send("OK I'm outside now, what happens next?");
     const request = model.requests[1]!;
     expect(JSON.stringify(request.messages)).toContain(ticket.ticketReference);
+  });
+
+  it("an Emergency ticket carries the Customer's details once they are verified", async () => {
+    const { service, model, sessionId, conversationId, send } = await chat();
+    const sarah = (await service.getDashboardState(sessionId)).demoCustomers.find(
+      (c) => c.fullName === "Sarah Mitchell",
+    )!;
+    model.script(
+      reply([toolCall("verify_customer", { jobReference: sarah.jobReferences[0], postcode: sarah.postcode })]),
+      reply([text("Thanks Sarah, you're verified.")]),
+    );
+    await send(`My reference is ${sarah.jobReferences[0]}, postcode ${sarah.postcode}`);
+
+    await send("there's water pouring from the boiler");
+
+    const ticket = (await service.getDashboardState(sessionId)).handoffTickets.find(
+      (t) => t.conversationId === conversationId,
+    )!;
+    expect(ticket.customer).toMatchObject({ fullName: "Sarah Mitchell", postcode: sarah.postcode });
   });
 
   it("the pre-filter firing is recorded in the Agent Trace", async () => {
