@@ -81,3 +81,42 @@ tool loop on Claude Sonnet 5.5 (`src/server/agent/runner.ts`).
   See `src/server/model-client.ts`.
 
 Set `ANTHROPIC_API_KEY` to chat; without it, the Agent replies with an apology.
+
+## Guardrails
+
+Cost and abuse limits for the public URL (#7):
+
+- **Message cap:** 40 Customer messages per Demo Session, across all its
+  conversations (`MAX_CUSTOMER_MESSAGES_PER_DEMO_SESSION`, pre-model hook
+  `src/server/agent/hooks/message-cap.ts`). Past the cap the Agent sends a fixed
+  `message_cap` reply without calling the model, and the chat offers
+  "Start a new demo". Keep the cap hook last in `hooks/index.ts` so the Emergency
+  pre-filter still runs past the cap.
+- **New-session rate limit:** at most 3 new Demo Sessions per client IP per
+  rolling hour (`MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR`). Only new sessions count;
+  resuming a live one does not. The API answers `429 { error: "rate_limited" }`
+  and the page shows a friendly "try again later". The IP comes from
+  `x-forwarded-for`, and only a salted SHA-256 hash is stored
+  (`demo_session.client_ip_hash`). Expired sessions still count until cleanup
+  deletes them. That is fine because the TTL (4 h) is longer than the window.
+- **Monthly API spend cap:** set in the Anthropic Console (deploy ticket).
+
+### Expired-session cleanup
+
+`service.deleteExpiredDemoSessions()` deletes every Demo Session past its TTL
+together with all its data. Every session-scoped table must reference
+`demo_session(id) ON DELETE CASCADE`. Expired sessions are already unreachable,
+so cleanup only frees storage.
+
+In production it runs from Vercel Cron: `vercel.json` calls
+`GET /api/cron/cleanup-expired-sessions` daily at 04:00 UTC. The Hobby plan
+allows only daily cron jobs. On Pro you can change the schedule to hourly
+(`0 * * * *`). To enable it at deploy time (#9):
+
+1. In Vercel → Project → Settings → Environment Variables (Production), set
+   `CRON_SECRET` to a long random string (e.g. `openssl rand -hex 32`). Vercel
+   sends it as `Authorization: Bearer <CRON_SECRET>`. Without it the endpoint
+   answers 401 to every request.
+2. Set `DEMO_SESSION_IP_SALT` to another long random string.
+3. Deploy. Check that Project → Settings → Cron Jobs lists the job, then click
+   **Run** once and confirm the response is `{ "deleted": <n> }`.
