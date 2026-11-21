@@ -9,6 +9,7 @@ import {
   type PreModelHook,
 } from "@/server/agent";
 import * as conversations from "@/server/agent/conversation-store";
+import type { JobStatus, PartsStatus } from "@/domain/vocabulary";
 import type { Clock } from "@/server/clock";
 import type { Database } from "@/server/db/database";
 import type { ModelClient } from "@/server/model-client";
@@ -18,8 +19,10 @@ import {
   DemoSessionNotFoundError,
   DemoSessionRateLimitedError,
   EmptyCustomerMessageError,
+  InvalidStatusAdvanceError,
 } from "./errors";
 import { seedWorld } from "./seed-world";
+import * as statusAdvance from "./status-advance";
 
 export interface DemoSessionServiceDeps {
   db: Database;
@@ -87,6 +90,24 @@ export interface DemoSessionService {
    * @returns the deleted Demo Session ids
    */
   deleteExpiredDemoSessions(): Promise<string[]>;
+  /**
+   * Presenter control: moves a Job one step forward along Scheduled → In
+   * Progress → Awaiting Parts → Completed. `from` is the status the Operator
+   * saw. @throws InvalidStatusAdvanceError at a terminal status, if `from` is
+   * stale, or if the Job isn't in this session; DemoSessionNotFoundError
+   */
+  advanceJobStatus(sessionId: string, jobId: string, from: JobStatus): Promise<{ jobStatus: JobStatus }>;
+  /**
+   * Presenter control: moves a Parts Order one step forward along Ordered →
+   * Dispatched → Arrived → Fitted. Arriving doesn't change the Job: it stays
+   * Awaiting Parts until a fitting Visit is booked.
+   * @throws InvalidStatusAdvanceError, DemoSessionNotFoundError
+   */
+  advancePartsStatus(
+    sessionId: string,
+    partsOrderId: string,
+    from: PartsStatus,
+  ): Promise<{ partsStatus: PartsStatus }>;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -204,6 +225,18 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
         [clock.now()],
       );
       return rows.map((r) => r.id);
+    },
+
+    async advanceJobStatus(sessionId, jobId, from) {
+      await requireLive(sessionId);
+      if (!UUID.test(jobId)) throw new InvalidStatusAdvanceError("No such Job in this Demo Session.");
+      return statusAdvance.advanceJobStatus(db, sessionId, jobId, from);
+    },
+
+    async advancePartsStatus(sessionId, partsOrderId, from) {
+      await requireLive(sessionId);
+      if (!UUID.test(partsOrderId)) throw new InvalidStatusAdvanceError("No such Parts Order in this Demo Session.");
+      return statusAdvance.advancePartsStatus(db, sessionId, partsOrderId, from, clock.now());
     },
   };
   return service;

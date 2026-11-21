@@ -1,4 +1,5 @@
 import { londonDateOf } from "@/domain/london-time";
+import { fittingVisitOffer } from "@/server/scheduling/fitting-visit";
 import { getVerification, normaliseJobReference, verifiedJobId } from "@/server/verification";
 import type { AgentTool } from "../types";
 
@@ -73,6 +74,7 @@ export const getJobDetails: AgentTool = {
         })),
         assignedEngineerFirstName: assigned ? firstName(assigned.engineer_name) : null,
         partsOrders: parts.rows,
+        fittingVisitOffer: await fittingVisitOffer(db, sessionId, jobId, ctx.now),
       },
     };
   },
