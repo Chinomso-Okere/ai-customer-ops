@@ -1,4 +1,5 @@
 import type { IssueType } from "@/domain/vocabulary";
+import { matchCustomer } from "./customer-matching";
 import type { Database } from "@/server/db/database";
 import { checkWindowAvailable, type CandidateWindow } from "./availability";
 
@@ -64,7 +65,8 @@ export interface BookedJob {
 }
 
 /**
- * Books: creates a new Customer, a Scheduled Job and its first Visit. Returns
+ * Books: a Scheduled Job and its first Visit, under the matching Customer or a
+ * new one (see `matchCustomer`). Returns
  * undefined (writing nothing that survives the caller's rollback) if the window
  * has no Availability. Call inside a transaction; roll back on undefined.
  */
@@ -84,12 +86,17 @@ export async function bookJob(
   if (!available) return undefined;
 
   const { customer } = booking;
-  const customerRow = await tx.query<{ id: string }>(
-    `INSERT INTO customer (session_id, full_name, postcode, email, phone, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [sessionId, customer.fullName, customer.postcode, customer.email, customer.phone, booking.now],
-  );
-  const customerId = customerRow.rows[0]!.id;
+  const match = await matchCustomer(tx, sessionId, customer);
+  const customerId =
+    match.kind === "existing"
+      ? match.customerId
+      : (
+          await tx.query<{ id: string }>(
+            `INSERT INTO customer (session_id, full_name, postcode, email, phone, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+            [sessionId, customer.fullName, customer.postcode, customer.email, customer.phone, booking.now],
+          )
+        ).rows[0]!.id;
   const jobReference = await nextJobReference(tx, sessionId);
   const jobRow = await tx.query<{ id: string }>(
     `INSERT INTO job (session_id, job_reference, customer_id, issue_type, description, job_status, created_at)
