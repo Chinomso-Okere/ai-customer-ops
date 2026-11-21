@@ -8,3 +8,7 @@ export const MODEL_REFUSAL_REPLY =
 
 export const AGENT_ERROR_REPLY =
   "Sorry, something went wrong on our side. Please try again in a moment.";
+
+/** Shown once a Demo Session reaches its Customer message cap; the widget offers "Start a new demo". */
+export const MESSAGE_CAP_REPLY =
+  "You've reached the message limit for this demo. Thanks for trying Apex! Start a new demo to keep chatting.";

@@ -32,3 +32,15 @@ export function writeConversationId(response: NextResponse, conversationId: stri
   response.cookies.set(CONVERSATION_COOKIE, conversationId, COOKIE_OPTIONS);
   return response;
 }
+
+/** The visitor's IP, for per-IP guardrails. Vercel sets `x-forwarded-for` (client first). */
+export function readClientIp(request: NextRequest): string | undefined {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || request.headers.get("x-real-ip")?.trim() || undefined;
+}
+
+/** The friendly refusal when one IP starts too many Demo Sessions (DemoSessionRateLimitedError). */
+export const RATE_LIMITED_BODY = {
+  error: "rate_limited",
+  message: "You've started a lot of demos in the last hour. Please try again later.",
+} as const;

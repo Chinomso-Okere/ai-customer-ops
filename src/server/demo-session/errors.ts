@@ -21,3 +21,11 @@ export class EmptyCustomerMessageError extends Error {
     this.name = "EmptyCustomerMessageError";
   }
 }
+
+/** Too many new Demo Sessions from this visitor's IP in the last hour; they should try again later. */
+export class DemoSessionRateLimitedError extends Error {
+  constructor() {
+    super("Too many new Demo Sessions from this IP; try again later");
+    this.name = "DemoSessionRateLimitedError";
+  }
+}

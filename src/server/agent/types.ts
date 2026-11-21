@@ -13,7 +13,9 @@ export type ChatMessageKind =
   /** The fixed reply when the model declines (stop reason `refusal`). */
   | "model_refusal"
   /** The fixed apology when the model could not be reached or the turn failed. */
-  | "agent_error";
+  | "agent_error"
+  /** The fixed reply once the Demo Session's message cap is reached (#7). */
+  | "message_cap";
 
 /** One message of the Customer-visible transcript. JSON-safe. */
 export interface ChatMessage {

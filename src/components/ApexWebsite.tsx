@@ -17,10 +17,16 @@ const SERVICES = [
 export function ApexWebsite({
   sessionId,
   state = null,
+  onStartNewDemo,
+  startingNewDemo,
+  notice,
 }: {
   sessionId: string | null;
   /** Live Demo Session state, for the scenario tray's demo Customer details. */
   state?: DashboardState | null;
+  onStartNewDemo: () => void;
+  startingNewDemo: boolean;
+  notice: string | null;
 }) {
   const [outgoing, setOutgoing] = useState<OutgoingChatMessage | null>(null);
   const sendScenario = (text: string) => setOutgoing((prev) => ({ id: (prev?.id ?? 0) + 1, text }));
@@ -47,7 +53,13 @@ export function ApexWebsite({
         real company is coincidental.
       </p>
       <ScenarioTray state={state} onSend={sendScenario} disabled={!sessionId} />
-      <ChatWidget sessionId={sessionId} outgoing={outgoing} />
+      <ChatWidget
+        sessionId={sessionId}
+        outgoing={outgoing}
+        onStartNewDemo={onStartNewDemo}
+        startingNewDemo={startingNewDemo}
+        notice={notice}
+      />
     </div>
   );
 }

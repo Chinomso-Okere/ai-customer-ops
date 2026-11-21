@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   AGENT_TOOLS,
   PRE_MODEL_HOOKS,
@@ -12,7 +13,12 @@ import type { Clock } from "@/server/clock";
 import type { Database } from "@/server/db/database";
 import type { ModelClient } from "@/server/model-client";
 import { readDashboardState, type DashboardState } from "./dashboard-state";
-import { ConversationNotFoundError, DemoSessionNotFoundError, EmptyCustomerMessageError } from "./errors";
+import {
+  ConversationNotFoundError,
+  DemoSessionNotFoundError,
+  DemoSessionRateLimitedError,
+  EmptyCustomerMessageError,
+} from "./errors";
 import { seedWorld } from "./seed-world";
 
 export interface DemoSessionServiceDeps {
@@ -31,15 +37,30 @@ export const DEMO_SESSION_TTL_MS = 4 * 60 * 60 * 1000;
 /** Longest Customer message the Agent accepts, in characters; longer ones are truncated. */
 export const MAX_CUSTOMER_MESSAGE_LENGTH = 2000;
 
+/** Abuse guardrail: new Demo Sessions one client IP may start per rolling hour. */
+export const MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR = 3;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+
+export interface NewDemoSessionOptions {
+  /** The visitor's IP. When given, new Demo Sessions are rate limited per IP. */
+  clientIp?: string;
+}
+
 /**
  * The Demo Session service: the only thing the web layer calls, and the
  * primary test seam (Seam 1). Every operation is scoped to one Demo Session.
  */
 export interface DemoSessionService {
-  /** Starts a new Demo Session seeded relative to the clock's "now". Reset = call this again. */
-  createDemoSession(): Promise<string>;
-  /** Resumes `sessionId` if it is live; otherwise starts a new Demo Session. */
-  openDemoSession(sessionId: string | undefined): Promise<string>;
+  /**
+   * Starts a new Demo Session seeded relative to the clock's "now". Reset = call this again.
+   * @throws DemoSessionRateLimitedError past MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR for `clientIp`
+   */
+  createDemoSession(options?: NewDemoSessionOptions): Promise<string>;
+  /**
+   * Resumes `sessionId` if it is live; otherwise starts a new Demo Session.
+   * @throws DemoSessionRateLimitedError (only when it would start a new one)
+   */
+  openDemoSession(sessionId: string | undefined, options?: NewDemoSessionOptions): Promise<string>;
   /** @throws DemoSessionNotFoundError if the session is unknown or expired. */
   getDashboardState(sessionId: string): Promise<DashboardState>;
   /**
@@ -59,6 +80,13 @@ export interface DemoSessionService {
     conversationId: string,
     text: string,
   ): Promise<CustomerTurnResult>;
+  /**
+   * Cleanup: deletes every Demo Session past its TTL with all its data (every
+   * session-scoped table cascades from `demo_session`). Live sessions are
+   * untouched. Run on a schedule (see README "Expired-session cleanup").
+   * @returns the deleted Demo Session ids
+   */
+  deleteExpiredDemoSessions(): Promise<string[]>;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -113,22 +141,34 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
   }
 
   const service: DemoSessionService = {
-    async createDemoSession() {
+    async createDemoSession(options) {
       const now = clock.now();
       const sessionId = crypto.randomUUID();
+      const ipHash = options?.clientIp ? hashClientIp(options.clientIp) : null;
       await db.transaction(async (tx) => {
+        if (ipHash) {
+          // Serialise creations per IP so concurrent requests can't all slip under the limit.
+          await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [ipHash]);
+          const { rows } = await tx.query<{ n: string }>(
+            "SELECT count(*) AS n FROM demo_session WHERE client_ip_hash = $1 AND created_at > $2",
+            [ipHash, new Date(now.getTime() - RATE_LIMIT_WINDOW_MS)],
+          );
+          if (Number(rows[0]!.n) >= MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR) {
+            throw new DemoSessionRateLimitedError();
+          }
+        }
         await tx.query(
-          "INSERT INTO demo_session (id, created_at, expires_at) VALUES ($1, $2, $3)",
-          [sessionId, now, new Date(now.getTime() + DEMO_SESSION_TTL_MS)],
+          "INSERT INTO demo_session (id, created_at, expires_at, client_ip_hash) VALUES ($1, $2, $3, $4)",
+          [sessionId, now, new Date(now.getTime() + DEMO_SESSION_TTL_MS), ipHash],
         );
         await seedWorld(tx, sessionId, now);
       });
       return sessionId;
     },
 
-    async openDemoSession(sessionId) {
+    async openDemoSession(sessionId, options) {
       if (sessionId && (await isLive(sessionId))) return sessionId;
-      return service.createDemoSession();
+      return service.createDemoSession(options);
     },
 
     async getDashboardState(sessionId) {
@@ -157,6 +197,23 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
         return { replies, conversation };
       });
     },
+
+    async deleteExpiredDemoSessions() {
+      const { rows } = await db.query<{ id: string }>(
+        "DELETE FROM demo_session WHERE expires_at <= $1 RETURNING id",
+        [clock.now()],
+      );
+      return rows.map((r) => r.id);
+    },
   };
   return service;
+}
+
+/**
+ * The IP is personal data, so only a salted hash is stored. Set
+ * DEMO_SESSION_IP_SALT in production so hashes can't be reversed by brute force.
+ */
+function hashClientIp(clientIp: string): string {
+  const salt = process.env.DEMO_SESSION_IP_SALT ?? "apex-demo";
+  return createHash("sha256").update(`${salt}:${clientIp.trim()}`).digest("hex");
 }

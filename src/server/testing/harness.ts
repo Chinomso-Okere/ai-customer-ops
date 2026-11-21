@@ -36,7 +36,8 @@ export async function createHarness(options: {
     agentTools: options.agentTools,
     preModelHooks: options.preModelHooks,
   });
-  return { service, clock, model };
+  // `db` is for checks the service cannot make by design (e.g. that cleanup left no rows).
+  return { service, clock, model, db };
 }
 
 /** A London wall-clock instant, e.g. london("2026-11-18T11:30"). */
