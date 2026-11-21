@@ -189,6 +189,42 @@ describe("Agent chat", () => {
     expect((await service.sendCustomerMessage(sessionId, conversationId, "SW4?")).replies[0]!.kind).toBe("text");
   });
 
+  describe("a tool call that keeps failing the same way", () => {
+    const incomplete = () => reply([toolCall("verify_customer", { jobReference: null, fullName: "Emma Clarke", postcode: null, email: null })]);
+
+    it("the second identical failure tells the model not to repeat the call", async () => {
+      const { service, model, sessionId, conversationId } = await chatHarness();
+      model.script(incomplete(), incomplete(), reply([text("Could I have your postcode and email?")]));
+
+      const result = await service.sendCustomerMessage(sessionId, conversationId, "I'm Emma Clarke");
+
+      expect(result.replies.map((r) => r.kind)).toEqual(["text"]);
+      const first = lastToolResults(model.requests[1]!)[0]!;
+      const second = lastToolResults(model.requests[2]!)[0]!;
+      expect(first.is_error).toBe(true);
+      expect(second.is_error).toBe(true);
+      expect(JSON.parse(second.content as string)).toMatchObject({ errorCode: "repeated_failed_call" });
+    });
+
+    it("ends the turn with an apology after the third, instead of spending the whole model call budget", async () => {
+      const { service, model, sessionId, conversationId } = await chatHarness();
+      // A different failing call in between doesn't reset the count.
+      const other = () => reply([toolCall("get_job_details", { jobReference: "APX-10401" })]);
+      model.script(incomplete(), other(), incomplete(), incomplete());
+
+      const result = await service.sendCustomerMessage(sessionId, conversationId, "I'm Emma Clarke");
+
+      expect(result.replies.map((r) => [r.kind, r.text])).toEqual([["agent_error", AGENT_ERROR_REPLY]]);
+      expect(model.requests).toHaveLength(4);
+      const { agentTrace } = await service.getDashboardState(sessionId);
+      expect(agentTrace.map((e) => e.kind)).toEqual(["tool_call", "tool_call", "tool_call", "tool_call", "error"]);
+
+      // The history stays valid: the next turn works.
+      model.script(reply([text("Hello again!")]));
+      expect((await service.sendCustomerMessage(sessionId, conversationId, "Hi")).replies[0]!.kind).toBe("text");
+    });
+  });
+
   describe("what the model is sent", () => {
     async function twoTurns() {
       const h = await chatHarness();
