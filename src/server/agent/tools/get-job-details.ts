@@ -1,7 +1,7 @@
 import { londonDateOf } from "@/domain/london-time";
 import { fittingVisitOffer } from "@/server/scheduling/fitting-visit";
 import { getVerification, normaliseJobReference, verifiedJobId } from "@/server/verification";
-import type { AgentTool } from "../types";
+import { TOOL_ERRORS, type AgentTool } from "../types";
 
 /** Read-only Job lookup (#6); refuses unless the conversation is verified for the Job's Customer. */
 export const getJobDetails: AgentTool = {
@@ -23,13 +23,16 @@ export const getJobDetails: AgentTool = {
     const jobId = await verifiedJobId(ctx.db, ctx, reference);
     if (!jobId) {
       const state = await getVerification(ctx.db, ctx);
+      if (state.locked) {
+        return {
+          ok: false,
+          error: "Verification is locked for this conversation; no Job details can be shared. Offer Escalation instead.",
+        };
+      }
+      if (!state.verifiedCustomerId) return TOOL_ERRORS.notVerified;
       return {
         ok: false,
-        error: state.locked
-          ? "Verification is locked for this conversation; no Job details can be shared. Offer Escalation instead."
-          : state.verifiedCustomerId
-            ? `${normaliseJobReference(reference)} is not one of the verified Customer's Jobs. Ask which of their Jobs they mean.`
-            : "The Customer is not verified in this conversation. Call verify_customer first.",
+        error: `${normaliseJobReference(reference)} is not one of the verified Customer's Jobs. Ask which of their Jobs they mean.`,
       };
     }
 

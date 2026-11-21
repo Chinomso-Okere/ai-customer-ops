@@ -7,7 +7,7 @@ import {
   findAvailability,
   windowForModel,
 } from "@/server/scheduling/availability";
-import type { AgentTool } from "../types";
+import { TOOL_ERRORS, type AgentTool } from "../types";
 
 /** Read-only: the earliest Time Windows an Engineer skilled for the Issue Type can attend. */
 export const getAvailability: AgentTool = {
@@ -29,10 +29,7 @@ export const getAvailability: AgentTool = {
     const postcode = typeof input.postcode === "string" ? normalisePostcode(input.postcode) : "";
     if (postcode.length < 5) return { ok: false, error: "Ask the Customer for their full postcode." };
     if (!isInCoverageArea(postcode)) {
-      return {
-        ok: false,
-        error: `${outwardCode(postcode)} is outside the Apex Coverage Area, so it can't be booked. Politely tell the Customer Apex doesn't cover their postcode. This is not an Escalation.`,
-      };
+      return TOOL_ERRORS.outsideCoverageArea(outwardCode(postcode));
     }
     const windows = await findAvailability(ctx.db, ctx.sessionId, issueType, ctx.now, { limit: OFFERED_WINDOWS });
     const { until } = availabilityHorizon(ctx.now);

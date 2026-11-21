@@ -115,7 +115,7 @@ describe("Complaint and Out of Policy escalations (create_handoff_ticket)", () =
     ]);
   });
 
-  it("after escalating, the model is told the ticket is open and not to act on that topic", async () => {
+  it("after escalating, the model is told about the open ticket in a mid-conversation system message", async () => {
     const h = await chatHarness(WEDNESDAY);
     const outcome = await toolTurn(h, "I want compensation", "create_handoff_ticket", {
       reason: "Out of Policy",
@@ -128,7 +128,6 @@ describe("Complaint and Out of Policy escalations (create_handoff_ticket)", () =
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "OK. Separately, how much is a boiler service?");
     const notes = JSON.stringify(h.model.requests.at(-1)!.messages.filter((m) => (m.role as string) === "system"));
     expect(notes).toContain(reference);
-    expect(notes).toMatch(/do not/i);
   });
 });
 

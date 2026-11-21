@@ -101,7 +101,26 @@ export type ToolOutcome =
       ok: false;
       /** Actionable for the model, e.g. "Postcode missing: ask the Customer for it." */
       error: string;
+      /** A stable, machine-readable reason, sent alongside `error` (tests assert on it, never on wording). */
+      code?: ToolErrorCode;
     };
+
+/** Structured reasons a tool refused. */
+export type ToolErrorCode = "outside_coverage_area" | "not_verified";
+
+/** Shared refusals, so every tool words and codes them the same way. */
+export const TOOL_ERRORS = {
+  notVerified: {
+    ok: false,
+    code: "not_verified",
+    error: "The Customer is not verified in this conversation. Call verify_customer first.",
+  },
+  outsideCoverageArea: (outwardCode: string) => ({
+    ok: false as const,
+    code: "outside_coverage_area" as const,
+    error: `${outwardCode} is outside the Apex Coverage Area, so it can't be booked. Politely tell the Customer Apex doesn't cover their postcode. This is not an Escalation.`,
+  }),
+} as const satisfies Record<string, ToolOutcome | ((...args: never[]) => ToolOutcome)>;
 
 /**
  * A domain tool the Agent can call. Each lives in its own file under

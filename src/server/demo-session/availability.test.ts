@@ -14,8 +14,7 @@ describe("Availability (get_availability)", () => {
       postcode: "M1 1AE",
     });
 
-    expect(res.ok).toBe(false);
-    expect(res.content).toMatch(/Coverage Area/);
+    expect(res).toMatchObject({ ok: false, code: "outside_coverage_area" });
     const state = await h.service.getDashboardState(h.sessionId);
     expect(state.handoffTickets.filter((t) => t.status === "Open")).toHaveLength(2); // only the seeded ones
   });

@@ -220,9 +220,7 @@ describe("Booking the fitting Visit", () => {
       timeWindow: "AM",
     });
 
-    expect(proposal.ok).toBe(false);
-    if (proposal.ok) return;
-    expect(proposal.error).toMatch(/verify_customer/);
+    expect(proposal).toMatchObject({ ok: false, code: "not_verified" });
   });
 });
 

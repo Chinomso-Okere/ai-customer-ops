@@ -246,9 +246,7 @@ describe("Reschedule and cancel: guardrails", () => {
 
     const res = await toolTurn(stranger, "cancel visit", "propose_cancellation", { visitId: visit.visitId });
 
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.error).toMatch(/verify_customer/);
+    expect(res).toMatchObject({ ok: false, code: "not_verified" });
   });
 
   it("another Customer's Visit can't be changed, even when verified", async () => {

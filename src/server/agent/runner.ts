@@ -65,7 +65,11 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
       console.error(`Agent tool ${use.name} failed`, error);
       outcome = { ok: false, error: "The tool failed unexpectedly. Apologise and offer to pass this to the team." };
     }
-    const content = outcome.ok ? JSON.stringify(outcome.result) : outcome.error;
+    const content = outcome.ok
+      ? JSON.stringify(outcome.result)
+      : outcome.code
+        ? JSON.stringify({ errorCode: outcome.code, error: outcome.error })
+        : outcome.error;
     await ctx.recordTrace({
       kind: "tool_call",
       toolName: use.name,
