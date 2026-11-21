@@ -1,4 +1,5 @@
 import type { PreModelHook } from "../types";
+import { emergencyPrefilter } from "./emergency-prefilter";
 
 /**
  * Pre-model hooks run in this order on every Customer message, before the model
@@ -6,4 +7,6 @@ import type { PreModelHook } from "../types";
  * model is not called. Add hooks with one import and one line below, e.g. the
  * Emergency pre-filter (#4, ADR-0002) and the message cap (#7).
  */
-export const PRE_MODEL_HOOKS: readonly PreModelHook[] = [];
+export const PRE_MODEL_HOOKS: readonly PreModelHook[] = [
+  emergencyPrefilter,
+];

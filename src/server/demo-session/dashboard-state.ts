@@ -107,6 +107,16 @@ export interface DashboardHandoffTicket {
   createdAt: string;
   customer: DashboardCustomer | null;
   jobReference: string | null;
+  /** The conversation it was raised from; null for seed tickets. */
+  conversationId: string | null;
+  /** What was added to the ticket, oldest first (empty for seed tickets). */
+  timeline: HandoffTicketEvent[];
+}
+
+export interface HandoffTicketEvent {
+  kind: "created" | "appended";
+  text: string;
+  at: string;
 }
 
 export interface DashboardPartsOrder {
@@ -234,9 +244,10 @@ export async function readDashboardState(
     postcode: string | null;
     email: string | null;
     job_reference: string | null;
+    conversation_id: string | null;
   }>(
     `SELECT t.id, t.ticket_number, t.escalation_reason, t.urgency, t.status, t.summary,
-            t.recommended_next_step, t.created_at,
+            t.recommended_next_step, t.created_at, t.conversation_id,
             c.full_name, c.postcode, c.email, j.job_reference
        FROM handoff_ticket t
        LEFT JOIN customer c ON c.id = t.customer_id AND c.session_id = t.session_id
@@ -245,6 +256,23 @@ export async function readDashboardState(
       ORDER BY array_position($2::text[], t.urgency), t.created_at, t.ticket_number`,
     [sessionId, URGENCIES],
   );
+
+  const ticketEvents = await db.query<{
+    ticket_id: string;
+    kind: HandoffTicketEvent["kind"];
+    text: string;
+    created_at: Date;
+  }>(
+    `SELECT ticket_id, kind, text, created_at FROM handoff_ticket_event
+      WHERE session_id = $1 ORDER BY seq`,
+    [sessionId],
+  );
+  const timelines = new Map<string, HandoffTicketEvent[]>();
+  for (const e of ticketEvents.rows) {
+    const list = timelines.get(e.ticket_id) ?? [];
+    list.push({ kind: e.kind, text: e.text, at: e.created_at.toISOString() });
+    timelines.set(e.ticket_id, list);
+  }
 
   const demoCustomers = await db.query<DemoCustomer>(
     `SELECT c.full_name AS "fullName", c.postcode, c.email, c.phone,
@@ -280,6 +308,8 @@ export async function readDashboardState(
           ? { fullName: t.full_name, postcode: t.postcode, email: t.email }
           : null,
       jobReference: t.job_reference,
+      conversationId: t.conversation_id,
+      timeline: timelines.get(t.id) ?? [],
     })),
   };
 }
