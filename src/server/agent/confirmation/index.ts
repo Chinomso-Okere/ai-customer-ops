@@ -1,4 +1,5 @@
 import { bookingAction } from "./booking";
+import { emergencyVisitAction } from "./emergency-visit";
 import { fittingVisitAction } from "./fitting-visit";
 import type { AnyPendingActionKind } from "./pending-actions";
 
@@ -11,4 +12,5 @@ export { confirmAction, proposeAction, type PendingActionKind } from "./pending-
 export const PENDING_ACTION_KINDS: readonly AnyPendingActionKind[] = [
   bookingAction,
   fittingVisitAction,
+  emergencyVisitAction,
 ];

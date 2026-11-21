@@ -5,6 +5,7 @@ import { confirmActionTool } from "./confirm-action";
 import { createHandoffTicket } from "./create-handoff-ticket";
 import { getAvailability } from "./get-availability";
 import { proposeBooking } from "./propose-booking";
+import { proposeEmergencyVisit } from "./propose-emergency-visit";
 import { proposeFittingVisit } from "./propose-fitting-visit";
 import { refuseOffTopic } from "./refuse-off-topic";
 import { getJobDetails } from "./get-job-details";
@@ -26,4 +27,5 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
   getJobDetails,
   createHandoffTicket,
   blockedDuringGasEmergency(proposeFittingVisit),
+  blockedDuringGasEmergency(proposeEmergencyVisit),
 ];

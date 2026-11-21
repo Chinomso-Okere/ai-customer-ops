@@ -104,3 +104,92 @@ describe("Gas/CO Emergency: no booking until an Operator resolves the ticket", (
     expect(proposal.ok).toBe(true);
   });
 });
+
+// Tuesday evening: Wednesday's windows are normally bookable (2h lead time).
+const TUESDAY_1900 = london("2026-11-17T19:00");
+const WEDNESDAY = "2026-11-18";
+
+/** Books ordinary Visits (each in its own conversation) until Wednesday has no Availability left. */
+async function fillWednesday(h: ChatHarness, issueType: string) {
+  for (let i = 0; i < 20; i++) {
+    const other: ChatHarness = { ...h, conversationId: await h.service.openConversation(h.sessionId, crypto.randomUUID()) };
+    const availability = await toolTurn(other, "book me in", "get_availability", { issueType, postcode: "SW4 9ZZ" });
+    if (!availability.ok) throw new Error(availability.error);
+    const first = availability.result.windows[0];
+    if (first.date !== WEDNESDAY) return;
+    const proposal = await toolTurn(other, "the earliest please", "propose_booking", {
+      fullName: `Filler Customer ${i}`,
+      postcode: "SW4 9ZZ",
+      email: `filler${i}@example.com`,
+      issueType,
+      ...pick(first),
+    });
+    if (!proposal.ok) throw new Error(proposal.error);
+    const confirmed = await toolTurn(other, "yes", "confirm_action", { pendingActionId: proposal.result.pendingActionId });
+    if (!confirmed.ok) throw new Error(confirmed.error);
+  }
+  throw new Error("Wednesday never filled up");
+}
+
+const FLOODED_CUSTOMER = {
+  fullName: "Priya Shah",
+  postcode: "SE5 8AA",
+  email: "priya.shah@example.com",
+  issueType: "Boiler Repair",
+};
+
+describe("Flood/sparks Emergency: the earliest Emergency Visit", () => {
+  it("can be booked on a day with no normal Availability, and is flagged as an Emergency Visit", async () => {
+    const h = await chatHarness(TUESDAY_1900);
+    await fillWednesday(h, "Boiler Repair");
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "water is pouring out of the boiler!");
+
+    const proposal = await toolTurn(h, "yes please send someone", "propose_emergency_visit", FLOODED_CUSTOMER);
+    expect(proposal.ok).toBe(true);
+    if (!proposal.ok) return;
+    expect(proposal.result.readBack).toMatchObject({
+      date: WEDNESDAY,
+      timeWindow: "AM",
+      issueType: "Boiler Repair",
+      postcode: "SE5 8AA",
+    });
+
+    const confirmed = await toolTurn(h, "yes, book it", "confirm_action", {
+      pendingActionId: proposal.result.pendingActionId,
+    });
+    expect(confirmed.ok).toBe(true);
+    if (!confirmed.ok) return;
+
+    const state = await h.service.getDashboardState(h.sessionId);
+    const job = state.jobs.find((j) => j.jobReference === confirmed.result.jobReference)!;
+    expect(job.customer).toMatchObject({ fullName: "Priya Shah" });
+    expect(job.visits).toEqual([expect.objectContaining({ date: WEDNESDAY, timeWindow: "AM", isEmergencyVisit: true })]);
+    const onCalendar = state.calendar.visits.find((v) => v.jobReference === confirmed.result.jobReference)!;
+    expect(onCalendar).toMatchObject({ isEmergencyVisit: true, date: WEDNESDAY, timeWindow: "AM" });
+    const engineer = state.calendar.engineers.find((e) => e.id === onCalendar.engineerId)!;
+    expect(engineer.skills).toContain("Boiler Repair");
+  });
+
+  it("is only offered during an open flood/sparks Emergency, never for gas/CO", async () => {
+    const h = await chatHarness(TUESDAY_1900);
+    const none = await toolTurn(h, "my boiler is broken, send someone now", "propose_emergency_visit", FLOODED_CUSTOMER);
+    expect(none.ok).toBe(false);
+
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "I smell gas");
+    const gas = await toolTurn(h, "please send someone", "propose_emergency_visit", FLOODED_CUSTOMER);
+    expect(gas.ok).toBe(false);
+  });
+
+  it("the model is told to offer the Emergency Visit through a mid-conversation system message", async () => {
+    const h = await chatHarness(TUESDAY_1900);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "sparks coming from the boiler");
+    const ticket = await openEmergencyTicket(h);
+
+    h.model.script(reply([text("I can send an Engineer.")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "what now?");
+
+    const notes = systemMessagesAfterLastCustomerMessage(h.model.requests.at(-1)!).join(" ");
+    expect(notes).toContain(ticket.ticketReference);
+    expect(notes).toContain("propose_emergency_visit");
+  });
+});

@@ -1,5 +1,5 @@
 import { formatPostcode, isInCoverageArea, normalisePostcode, outwardCode } from "@/domain/coverage-area";
-import { ISSUE_TYPES, parseIssueType } from "@/domain/vocabulary";
+import { ISSUE_TYPES, parseIssueType, type IssueType } from "@/domain/vocabulary";
 import { describeWindow, parseWindow, requireAvailableWindow } from "@/server/scheduling/availability";
 import { proposeAction } from "../confirmation";
 import type { BookingPayload } from "../confirmation/booking";
@@ -30,34 +30,21 @@ export const proposeBooking: AgentTool = {
   promptGuidance:
     "To Book: collect full name, postcode, Issue Type and email (phone optional), call get_availability and offer its windows (never invent dates), then call propose_booking with the chosen window. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm before calling confirm_action.",
   async run(input, ctx) {
-    const fullName = typeof input.fullName === "string" ? input.fullName.replace(/\s+/g, " ").trim() : "";
-    if (!fullName) return { ok: false, error: "Ask the Customer for their full name." };
-    const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
-    if (!EMAIL.test(email)) return { ok: false, error: "That email address doesn't look valid. Ask the Customer for it again." };
-    const issueType = parseIssueType(input.issueType);
-    if (!issueType) return { ok: false, error: `Unknown Issue Type. Use one of: ${ISSUE_TYPES.join(", ")}.` };
-    const postcode = typeof input.postcode === "string" ? normalisePostcode(input.postcode) : "";
-    if (postcode.length < 5) return { ok: false, error: "Ask the Customer for their full postcode." };
-    if (!isInCoverageArea(postcode)) {
-      return {
-        ok: false,
-        error: `${outwardCode(postcode)} is outside the Apex Coverage Area, so it can't be booked. Politely tell the Customer Apex doesn't cover their postcode. This is not an Escalation.`,
-      };
-    }
+    const details = parseBookingDetails(input);
+    if (!details.ok) return details;
+    const { fullName, email, issueType, postcode, phone, description } = details;
     const window = parseWindow(input.date, input.timeWindow);
     if (!window) return { ok: false, error: "Give date as YYYY-MM-DD and timeWindow as AM or PM, from get_availability." };
     const check = await requireAvailableWindow(ctx.db, ctx.sessionId, issueType, window, ctx.now);
     if (!check.ok) return check;
 
-    const phone = typeof input.phone === "string" && input.phone.trim() ? input.phone.trim() : null;
-    const summary = typeof input.problemSummary === "string" ? input.problemSummary.trim() : "";
     const payload: BookingPayload = {
       fullName,
-      postcode: formatPostcode(postcode),
+      postcode,
       email,
       phone,
       issueType,
-      description: summary || issueType,
+      description,
       date: window.date,
       timeWindow: window.timeWindow,
     };
@@ -83,3 +70,29 @@ export const proposeBooking: AgentTool = {
     };
   },
 };
+
+/**
+ * Validates the Customer details a Booking needs (also used for an Emergency
+ * Visit). `postcode` comes back in display form, e.g. "SW4 9ZZ".
+ */
+export function parseBookingDetails(input: Record<string, unknown>):
+  | { ok: false; error: string }
+  | { ok: true; fullName: string; email: string; issueType: IssueType; postcode: string; phone: string | null; description: string } {
+  const fullName = typeof input.fullName === "string" ? input.fullName.replace(/\s+/g, " ").trim() : "";
+  if (!fullName) return { ok: false, error: "Ask the Customer for their full name." };
+  const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
+  if (!EMAIL.test(email)) return { ok: false, error: "That email address doesn't look valid. Ask the Customer for it again." };
+  const issueType = parseIssueType(input.issueType);
+  if (!issueType) return { ok: false, error: `Unknown Issue Type. Use one of: ${ISSUE_TYPES.join(", ")}.` };
+  const postcode = typeof input.postcode === "string" ? normalisePostcode(input.postcode) : "";
+  if (postcode.length < 5) return { ok: false, error: "Ask the Customer for their full postcode." };
+  if (!isInCoverageArea(postcode)) {
+    return {
+      ok: false,
+      error: `${outwardCode(postcode)} is outside the Apex Coverage Area, so it can't be booked. Politely tell the Customer Apex doesn't cover their postcode. This is not an Escalation.`,
+    };
+  }
+  const phone = typeof input.phone === "string" && input.phone.trim() ? input.phone.trim() : null;
+  const summary = typeof input.problemSummary === "string" ? input.problemSummary.trim() : "";
+  return { ok: true, fullName, email, issueType, postcode: formatPostcode(postcode), phone, description: summary || issueType };
+}
