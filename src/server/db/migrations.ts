@@ -227,6 +227,15 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
       CREATE INDEX handoff_ticket_event_ticket_idx ON handoff_ticket_event (session_id, ticket_id, seq);
     `,
   },
+  {
+    id: "0007_t11_possible_duplicate_customer",
+    sql: `
+      -- Set when a Booking's email matched this existing Customer but the name or
+      -- postcode didn't: an Operator should check and merge them.
+      ALTER TABLE customer
+        ADD COLUMN possible_duplicate_of uuid REFERENCES customer(id) ON DELETE CASCADE;
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.

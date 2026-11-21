@@ -45,3 +45,14 @@ export class DemoSessionRateLimitedError extends Error {
     this.name = "DemoSessionRateLimitedError";
   }
 }
+
+/**
+ * A status advance was refused: the status is terminal, has moved on since the
+ * Operator saw it, or the Job/Parts Order isn't in this Demo Session.
+ */
+export class InvalidStatusAdvanceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidStatusAdvanceError";
+  }
+}
