@@ -40,6 +40,76 @@ describe("Emergency pre-filter → Safety Script → Critical Handoff Ticket", (
     expect(replies.some((r) => (r.payload as { ticketReference?: string } | null)?.ticketReference === top.ticketReference)).toBe(true);
   });
 
+  it("a second Emergency message appends to the open ticket and quotes its ID; no duplicate", async () => {
+    const { service, sessionId, conversationId, send } = await chat();
+    await send("I smell gas");
+    const before = (await service.getDashboardState(sessionId)).handoffTickets.filter(
+      (t) => t.conversationId === conversationId,
+    );
+    expect(before).toHaveLength(1);
+    const ticketReference = before[0]!.ticketReference;
+
+    const { replies } = await send("the CO alarm has started going off too");
+
+    expect(replies.some((r) => r.kind === "safety_script")).toBe(true);
+    const notice = replies.find((r) => r.kind === "handoff_notice");
+    expect(notice!.payload).toMatchObject({ ticketReference, isNewTicket: false });
+    expect(notice!.text).toContain(ticketReference);
+    const after = (await service.getDashboardState(sessionId)).handoffTickets.filter(
+      (t) => t.conversationId === conversationId,
+    );
+    expect(after).toHaveLength(1);
+    expect(after[0]!.timeline.map((e) => e.kind)).toEqual(["created", "appended"]);
+    expect(after[0]!.timeline[1]!.text).toContain("CO alarm");
+  });
+
+  it("each conversation gets its own Emergency ticket, numbered after the seed tickets", async () => {
+    const { service, sessionId, send } = await chat();
+    const other = await service.openConversation(sessionId, crypto.randomUUID());
+
+    await send("gas leak!");
+    await service.sendCustomerMessage(sessionId, other, "gas leak!");
+
+    const refs = (await service.getDashboardState(sessionId)).handoffTickets
+      .filter((t) => t.escalationReason === "Emergency" && t.conversationId)
+      .map((t) => t.ticketReference)
+      .sort();
+    // The seed world has 2 tickets.
+    expect(refs).toEqual(["APX-H-0003", "APX-H-0004"]);
+  });
+
+  it("the pre-filter runs on every message: an Emergency mid-conversation is caught, and the model then learns of the ticket", async () => {
+    const { service, model, sessionId, conversationId, send } = await chat();
+    model.script(reply([text("A boiler service is £89. Shall I book one?")]));
+    const routine = await send("How much is a gas boiler service? There's no gas smell, it's just due.");
+    expect(routine.replies[0]!.kind).toBe("text");
+    expect(model.requests).toHaveLength(1);
+
+    const emergency = await send("Actually wait, I can smell gas now");
+    expect(model.requests).toHaveLength(1);
+    expect(emergency.replies.some((r) => r.kind === "safety_script")).toBe(true);
+    const ticket = (await service.getDashboardState(sessionId)).handoffTickets.find(
+      (t) => t.conversationId === conversationId,
+    )!;
+    expect(ticket.urgency).toBe("Critical");
+
+    // The next ordinary message reaches the model with a valid history that
+    // tells it about the open Emergency ticket.
+    model.script(reply([text("I've left the house.")]));
+    await send("OK I'm outside now, what happens next?");
+    const request = model.requests[1]!;
+    expect(JSON.stringify(request.messages)).toContain(ticket.ticketReference);
+  });
+
+  it("the pre-filter firing is recorded in the Agent Trace", async () => {
+    const { service, sessionId, conversationId, send } = await chat();
+    await send("there are sparks coming from the boiler");
+    const entry = (await service.getDashboardState(sessionId)).agentTrace.find(
+      (e) => e.conversationId === conversationId,
+    );
+    expect(entry).toMatchObject({ kind: "emergency_prefilter" });
+  });
+
   it("a flood Emergency gets the flood/sparks Safety Script", async () => {
     const { model, send } = await chat();
 
