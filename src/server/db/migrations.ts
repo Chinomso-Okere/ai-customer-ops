@@ -62,6 +62,17 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
       CREATE UNIQUE INDEX visit_engineer_window_uniq
         ON visit (session_id, engineer_id, visit_date, time_window)
         WHERE NOT is_emergency_visit;
+
+      CREATE TABLE parts_order (
+        id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id       uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        job_id           uuid NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+        part_name        text NOT NULL,
+        parts_status     text NOT NULL,
+        expected_arrival date NOT NULL,
+        created_at       timestamptz NOT NULL
+      );
+      CREATE INDEX parts_order_session_idx ON parts_order (session_id);
     `,
   },
 ];

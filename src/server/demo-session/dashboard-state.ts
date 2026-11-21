@@ -6,7 +6,7 @@ import {
   type PlainDate,
 } from "@/domain/london-time";
 import type { TimeWindow } from "@/domain/time-window";
-import type { IssueType, JobStatus } from "@/domain/vocabulary";
+import type { IssueType, JobStatus, PartsStatus } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
 
 export interface DashboardEngineer {
@@ -71,6 +71,18 @@ export interface DashboardState {
   };
   /** Newest Job Reference first. */
   jobs: DashboardJob[];
+  /** Soonest expected arrival first. */
+  partsOrders: DashboardPartsOrder[];
+}
+
+export interface DashboardPartsOrder {
+  id: string;
+  jobReference: string;
+  partName: string;
+  partsStatus: PartsStatus;
+  /** Expected arrival, or actual arrival once Arrived/Fitted. */
+  expectedArrival: PlainDate;
+  customerName: string;
 }
 
 export async function readDashboardState(
@@ -163,10 +175,23 @@ export async function readDashboardState(
       })),
   );
 
+  const partsOrders = await db.query<DashboardPartsOrder>(
+    `SELECT p.id, j.job_reference AS "jobReference", p.part_name AS "partName",
+            p.parts_status AS "partsStatus", p.expected_arrival::text AS "expectedArrival",
+            c.full_name AS "customerName"
+       FROM parts_order p
+       JOIN job j ON j.id = p.job_id AND j.session_id = p.session_id
+       JOIN customer c ON c.id = j.customer_id AND c.session_id = j.session_id
+      WHERE p.session_id = $1
+      ORDER BY p.expected_arrival, j.job_reference`,
+    [sessionId],
+  );
+
   return {
     sessionId,
     calendar: { days, engineers: engineers.rows, visits: calendarVisits },
     jobs: dashboardJobs,
+    partsOrders: partsOrders.rows,
   };
 }
 

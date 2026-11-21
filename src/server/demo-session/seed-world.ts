@@ -1,4 +1,10 @@
-import { addWeekdays, isWeekday, londonDateOf, type PlainDate } from "@/domain/london-time";
+import {
+  addDays,
+  addWeekdays,
+  isWeekday,
+  londonDateOf,
+  type PlainDate,
+} from "@/domain/london-time";
 import { timeWindowStart, type TimeWindow } from "@/domain/time-window";
 import type { Database } from "@/server/db/database";
 import { CUSTOMERS, ENGINEERS, JOBS, type JobSeed } from "./seed-data";
@@ -55,6 +61,20 @@ export async function seedWorld(tx: Database, sessionId: string, now: Date): Pro
         `INSERT INTO visit (session_id, job_id, engineer_id, visit_date, time_window)
          VALUES ($1, $2, $3, $4, $5)`,
         [sessionId, rows[0]!.id, engineerIds[v.engineer], v.date, v.timeWindow],
+      );
+    }
+    if (job.partsOrder) {
+      await tx.query(
+        `INSERT INTO parts_order (session_id, job_id, part_name, parts_status, expected_arrival, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          sessionId,
+          rows[0]!.id,
+          job.partsOrder.partName,
+          job.partsOrder.partsStatus,
+          addDays(today, job.partsOrder.arrivalDayOffset),
+          createdAt,
+        ],
       );
     }
   }

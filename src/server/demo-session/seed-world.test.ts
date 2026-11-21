@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isInCoverageArea, outwardCode } from "@/domain/coverage-area";
 import { addDays, addWeekdays, isWeekday, londonDateOf } from "@/domain/london-time";
 import { TIME_WINDOWS } from "@/domain/time-window";
-import { JOB_STATUSES } from "@/domain/vocabulary";
+import { JOB_STATUSES, PARTS_STATUSES } from "@/domain/vocabulary";
 import { createHarness, london } from "@/server/testing/harness";
 
 // A Wednesday morning in November (GMT).
@@ -41,6 +41,19 @@ describe("seed world", () => {
     const outwardCodes = new Set(state.jobs.map((j) => outwardCode(j.customer.postcode)));
     expect(outwardCodes.size).toBeGreaterThanOrEqual(8);
     for (const job of state.jobs) expect(isInCoverageArea(job.customer.postcode)).toBe(true);
+  });
+
+  it("has 6 Parts Orders across every Parts Status, one Dispatched and arriving tomorrow", async () => {
+    const state = await seededState(london("2026-11-20T16:30")); // Friday
+
+    expect(state.partsOrders).toHaveLength(6);
+    expect(new Set(state.partsOrders.map((p) => p.partsStatus))).toEqual(new Set(PARTS_STATUSES));
+    const arrivingTomorrow = state.partsOrders.filter(
+      (p) => p.partsStatus === "Dispatched" && p.expectedArrival === "2026-11-21",
+    );
+    expect(arrivingTomorrow).toHaveLength(1);
+    const jobReferences = new Set(state.jobs.map((j) => j.jobReference));
+    for (const p of state.partsOrders) expect(jobReferences).toContain(p.jobReference);
   });
 
   describe.each([
