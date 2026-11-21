@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { london } from "@/server/testing/harness";
+import { HandoffTicketNotFoundError, HandoffTicketStateError } from "@/server/demo-session";
 import { reply, text } from "@/server/testing/scripted-model-client";
 import { chatHarness, toolTurn, type ChatHarness } from "@/server/testing/tool-turns";
 
@@ -128,5 +129,72 @@ describe("Complaint and Out of Policy escalations (create_handoff_ticket)", () =
     const notes = JSON.stringify(h.model.requests.at(-1)!.messages.filter((m) => (m.role as string) === "system"));
     expect(notes).toContain(reference);
     expect(notes).toMatch(/do not/i);
+  });
+});
+
+describe("Operators Acknowledge and Resolve Handoff Tickets", () => {
+  it("Acknowledge then Resolve change the ticket's status in getDashboardState, with timeline entries", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    await toolTurn(h, "This is a disgrace", "create_handoff_ticket", complaint);
+    const [ticket] = await ticketsOf(h);
+
+    await h.service.acknowledgeHandoffTicket(h.sessionId, ticket!.id);
+    expect((await ticketsOf(h))[0]!.status).toBe("Acknowledged");
+
+    await h.service.resolveHandoffTicket(h.sessionId, ticket!.id);
+    const [resolved] = await ticketsOf(h);
+    expect(resolved!.status).toBe("Resolved");
+    expect(resolved!.timeline.map((e) => e.kind)).toEqual(["created", "acknowledged", "resolved"]);
+  });
+
+  it("seed tickets can be acknowledged and resolved too", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    const seed = (await h.service.getDashboardState(h.sessionId)).handoffTickets.filter((t) => !t.conversationId);
+    expect(seed.length).toBeGreaterThan(0);
+
+    await h.service.acknowledgeHandoffTicket(h.sessionId, seed[0]!.id);
+    expect((await h.service.getDashboardState(h.sessionId)).handoffTickets.find((t) => t.id === seed[0]!.id)!.status).toBe(
+      "Acknowledged",
+    );
+    for (const t of seed) await h.service.resolveHandoffTicket(h.sessionId, t.id);
+
+    const after = (await h.service.getDashboardState(h.sessionId)).handoffTickets.filter((t) => !t.conversationId);
+    expect(after.map((t) => t.status)).toEqual(seed.map(() => "Resolved"));
+  });
+
+  it("a resolved ticket cannot be acknowledged, and an unknown ticket is not found", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    const [seed] = (await h.service.getDashboardState(h.sessionId)).handoffTickets;
+    await h.service.resolveHandoffTicket(h.sessionId, seed!.id);
+
+    await expect(h.service.acknowledgeHandoffTicket(h.sessionId, seed!.id)).rejects.toBeInstanceOf(
+      HandoffTicketStateError,
+    );
+    await expect(h.service.resolveHandoffTicket(h.sessionId, crypto.randomUUID())).rejects.toBeInstanceOf(
+      HandoffTicketNotFoundError,
+    );
+  });
+
+  it("a ticket from another Demo Session cannot be touched", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    const otherSession = await h.service.createDemoSession();
+    const [foreign] = (await h.service.getDashboardState(otherSession)).handoffTickets;
+
+    await expect(h.service.resolveHandoffTicket(h.sessionId, foreign!.id)).rejects.toBeInstanceOf(
+      HandoffTicketNotFoundError,
+    );
+    expect((await h.service.getDashboardState(otherSession)).handoffTickets[0]!.status).toBe(foreign!.status);
+  });
+
+  it("once resolved, a new escalation on the same reason opens a fresh ticket", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    await toolTurn(h, "Rude engineer", "create_handoff_ticket", complaint);
+    const [first] = await ticketsOf(h);
+    await h.service.resolveHandoffTicket(h.sessionId, first!.id);
+
+    const again = await toolTurn(h, "Still unhappy", "create_handoff_ticket", complaint);
+
+    expect(again.ok && again.result.ticketAction).toBe("created");
+    expect(await ticketsOf(h)).toHaveLength(2);
   });
 });

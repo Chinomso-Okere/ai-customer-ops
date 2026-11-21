@@ -114,7 +114,8 @@ export interface DashboardHandoffTicket {
 }
 
 export interface HandoffTicketEvent {
-  kind: "created" | "appended";
+  /** created/appended by escalations; acknowledged/resolved by an Operator. */
+  kind: "created" | "appended" | "acknowledged" | "resolved";
   text: string;
   at: string;
 }

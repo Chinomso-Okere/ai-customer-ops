@@ -9,6 +9,7 @@ import {
   type PreModelHook,
 } from "@/server/agent";
 import * as conversations from "@/server/agent/conversation-store";
+import { changeHandoffTicketStatus } from "@/server/agent/handoff-tickets";
 import type { Clock } from "@/server/clock";
 import type { Database } from "@/server/db/database";
 import type { ModelClient } from "@/server/model-client";
@@ -87,6 +88,16 @@ export interface DemoSessionService {
    * @returns the deleted Demo Session ids
    */
   deleteExpiredDemoSessions(): Promise<string[]>;
+  /**
+   * An Operator acknowledges a Handoff Ticket (Open → Acknowledged; repeat is a no-op).
+   * @throws DemoSessionNotFoundError, HandoffTicketNotFoundError, HandoffTicketStateError (if Resolved)
+   */
+  acknowledgeHandoffTicket(sessionId: string, ticketId: string): Promise<void>;
+  /**
+   * An Operator resolves a Handoff Ticket (Open/Acknowledged → Resolved; repeat is a no-op).
+   * @throws DemoSessionNotFoundError, HandoffTicketNotFoundError
+   */
+  resolveHandoffTicket(sessionId: string, ticketId: string): Promise<void>;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -204,6 +215,16 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
         [clock.now()],
       );
       return rows.map((r) => r.id);
+    },
+
+    async acknowledgeHandoffTicket(sessionId, ticketId) {
+      await requireLive(sessionId);
+      await changeHandoffTicketStatus(db, { sessionId, ticketId, action: "acknowledge", now: clock.now() });
+    },
+
+    async resolveHandoffTicket(sessionId, ticketId) {
+      await requireLive(sessionId);
+      await changeHandoffTicketStatus(db, { sessionId, ticketId, action: "resolve", now: clock.now() });
     },
   };
   return service;

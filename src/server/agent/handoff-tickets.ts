@@ -1,6 +1,7 @@
-import { URGENCIES, type EscalationReason, type Urgency } from "@/domain/vocabulary";
+import { URGENCIES, type EscalationReason, type HandoffTicketStatus, type Urgency } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
-import { handoffTicketReference } from "@/server/demo-session/dashboard-state";
+import { handoffTicketReference, type HandoffTicketEvent } from "@/server/demo-session/dashboard-state";
+import { HandoffTicketNotFoundError, HandoffTicketStateError } from "@/server/demo-session/errors";
 
 /** Escalation Reason → default (and minimum) Urgency. */
 export const DEFAULT_URGENCY: Readonly<Record<EscalationReason, Urgency>> = {
@@ -110,11 +111,56 @@ function mostUrgent(...urgencies: Array<Urgency | undefined>): Urgency {
   return URGENCIES[Math.min(...ranks)]!;
 }
 
+/** Operator actions on a Handoff Ticket, and the status each moves it to. */
+export type HandoffTicketAction = "acknowledge" | "resolve";
+
+const TRANSITIONS: Record<HandoffTicketAction, { from: HandoffTicketStatus[]; to: HandoffTicketStatus; event: HandoffTicketEvent["kind"] }> = {
+  acknowledge: { from: ["Open"], to: "Acknowledged", event: "acknowledged" },
+  resolve: { from: ["Open", "Acknowledged"], to: "Resolved", event: "resolved" },
+};
+
+/**
+ * An Operator acknowledges or resolves a Handoff Ticket (seed or chat-raised).
+ * Repeating the same action is a no-op. Resolving frees the conversation's
+ * slot for that Escalation Reason, so a later escalation opens a new ticket.
+ * @throws HandoffTicketNotFoundError if the ticket isn't in this Demo Session
+ * @throws HandoffTicketStateError e.g. acknowledging a Resolved ticket
+ */
+export async function changeHandoffTicketStatus(
+  db: Database,
+  input: { sessionId: string; ticketId: string; action: HandoffTicketAction; now: Date },
+): Promise<HandoffTicketStatus> {
+  const { sessionId, ticketId, now } = input;
+  const transition = TRANSITIONS[input.action];
+  if (!UUID.test(ticketId)) throw new HandoffTicketNotFoundError(ticketId);
+  return db.transaction(async (tx) => {
+    const { rows } = await tx.query<{ status: HandoffTicketStatus }>(
+      "SELECT status FROM handoff_ticket WHERE session_id = $1 AND id = $2 FOR UPDATE",
+      [sessionId, ticketId],
+    );
+    const current = rows[0]?.status;
+    if (!current) throw new HandoffTicketNotFoundError(ticketId);
+    if (current === transition.to) return current;
+    if (!transition.from.includes(current)) {
+      throw new HandoffTicketStateError(`Cannot ${input.action} a ${current} Handoff Ticket.`);
+    }
+    await tx.query("UPDATE handoff_ticket SET status = $3 WHERE session_id = $1 AND id = $2", [
+      sessionId,
+      ticketId,
+      transition.to,
+    ]);
+    await addEvent(tx, sessionId, ticketId, transition.event, `${transition.to} by an Operator`, now);
+    return transition.to;
+  });
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function addEvent(
   tx: Database,
   sessionId: string,
   ticketId: string,
-  kind: "created" | "appended",
+  kind: HandoffTicketEvent["kind"],
   text: string,
   now: Date,
 ): Promise<void> {
