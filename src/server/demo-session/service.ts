@@ -272,7 +272,7 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
     async advanceJobStatus(sessionId, jobId, from) {
       await requireLive(sessionId);
       if (!UUID.test(jobId)) throw new InvalidStatusAdvanceError("No such Job in this Demo Session.");
-      return statusAdvance.advanceJobStatus(db, sessionId, jobId, from);
+      return statusAdvance.advanceJobStatus(db, sessionId, jobId, from, clock.now());
     },
 
     async advancePartsStatus(sessionId, partsOrderId, from) {
