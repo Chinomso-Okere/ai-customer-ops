@@ -115,3 +115,41 @@ export async function checkWindowAvailable(
   const [found] = await findAvailability(db, sessionId, issueType, now, { only: window });
   return found;
 }
+
+/** A Time Window named by the model ({date: "YYYY-MM-DD", timeWindow: "AM"|"PM"}), or undefined. */
+export function parseWindow(date: unknown, timeWindow: unknown): CandidateWindow | undefined {
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) return undefined;
+  if (Number.isNaN(new Date(`${date.trim()}T00:00:00Z`).getTime())) return undefined;
+  const w = typeof timeWindow === "string" ? timeWindow.trim().toUpperCase() : "";
+  if (!(TIME_WINDOWS as readonly string[]).includes(w)) return undefined;
+  return { date: date.trim(), timeWindow: w as TimeWindow };
+}
+
+/**
+ * Checks that `window` can be booked for `issueType` now. On failure, `error`
+ * is an actionable message for the model.
+ */
+export async function requireAvailableWindow(
+  db: Database,
+  sessionId: string,
+  issueType: IssueType,
+  window: CandidateWindow,
+  now: Date,
+): Promise<{ ok: true; available: AvailableWindow } | { ok: false; error: string }> {
+  const label = describeWindow(window);
+  if (!bookableWindows(now).some((w) => w.date === window.date && w.timeWindow === window.timeWindow)) {
+    const { until } = availabilityHorizon(now);
+    return {
+      ok: false,
+      error: `${label} can't be booked: Visits are on weekdays only, must start at least 2 hours from now, and no later than ${until}. Call get_availability and offer one of its windows.`,
+    };
+  }
+  const available = await checkWindowAvailable(db, sessionId, issueType, window, now);
+  if (!available) {
+    return {
+      ok: false,
+      error: `${label} has no ${issueType} Engineer free. Call get_availability and offer one of its windows.`,
+    };
+  }
+  return { ok: true, available };
+}

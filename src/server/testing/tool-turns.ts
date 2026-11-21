@@ -1,20 +1,24 @@
 import { createHarness } from "./harness";
-import { lastToolResults, reply, text, toolCall } from "./scripted-model-client";
+import { ScriptedModelClient, lastToolResults, reply, text, toolCall } from "./scripted-model-client";
 
 export type ChatHarness = Awaited<ReturnType<typeof chatHarness>>;
 
 /** A harness with a fresh Demo Session and an open conversation in it. */
 export async function chatHarness(now: Date) {
-  const harness = await createHarness({ now });
+  const model = new ScriptedModelClient();
+  const harness = await createHarness({ now, modelClient: model });
   const sessionId = await harness.service.createDemoSession();
   const conversationId = await harness.service.openConversation(sessionId, undefined);
-  return { ...harness, sessionId, conversationId };
+  return { ...harness, model, sessionId, conversationId };
 }
 
 /** What a domain tool sent back to the model. */
 export type ToolTurnResult =
   | { ok: true; result: any; content: string }
   | { ok: false; error: string; content: string };
+
+/** A tool input, or a function of the earlier results in the same turn. */
+export type ToolInput = Record<string, unknown> | ((previous: ToolTurnResult[]) => Record<string, unknown>);
 
 /**
  * Runs one Customer turn in which the (scripted) model calls `toolName` with
@@ -24,7 +28,7 @@ export async function toolTurn(
   h: ChatHarness,
   customerText: string,
   toolName: string,
-  input: unknown,
+  input: Record<string, unknown>,
 ): Promise<ToolTurnResult> {
   const [result] = await toolTurns(h, customerText, [[toolName, input]]);
   return result!;
@@ -38,7 +42,7 @@ export async function toolTurn(
 export async function toolTurns(
   h: ChatHarness,
   customerText: string,
-  calls: ReadonlyArray<readonly [string, unknown | ((previous: ToolTurnResult[]) => unknown)]>,
+  calls: ReadonlyArray<readonly [string, ToolInput]>,
 ): Promise<ToolTurnResult[]> {
   const results: ToolTurnResult[] = [];
   const collect = (request: Parameters<typeof lastToolResults>[0]) => {
@@ -49,7 +53,7 @@ export async function toolTurns(
   calls.forEach(([name, input], i) => {
     h.model.script((request) => {
       if (i > 0) collect(request);
-      const resolved = typeof input === "function" ? (input as (p: ToolTurnResult[]) => unknown)(results) : input;
+      const resolved = typeof input === "function" ? input(results) : input;
       return reply([toolCall(name, resolved)]);
     });
   });
