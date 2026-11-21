@@ -9,6 +9,7 @@ import type { Clock } from "@/server/clock";
 import type { Database } from "@/server/db/database";
 import type { ModelClient, ModelRequest } from "@/server/model-client";
 import * as store from "./conversation-store";
+import { AGENT_ERROR_REPLY, MODEL_REFUSAL_REPLY } from "./scripted-replies";
 import { buildSystemPrompt, currentTimeNote } from "./system-prompt";
 import type {
   AgentReplyDraft,
@@ -29,6 +30,9 @@ export interface AgentRunnerDeps {
 
 /** Fixed request settings. Changing any of them between requests invalidates the cache. */
 const MAX_TOKENS = 4096;
+
+/** Bounds cost per Customer message: model calls allowed in one turn. */
+export const MAX_MODEL_CALLS_PER_TURN = 8;
 
 /**
  * The Agent runner: a self-hosted manual tool loop on the Messages API.
@@ -80,6 +84,75 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
     };
   }
 
+  /**
+   * Calls the model and runs its tools until it stops. Appends every message to
+   * `turn` (the caller persists them) and returns what the Customer is shown.
+   * Always leaves `turn` ending in an assistant message, or throws.
+   */
+  async function runToolLoop(
+    turn: BetaMessageParam[],
+    request: (maxTokens?: number) => ModelRequest,
+    ctx: AgentTurnContext,
+  ): Promise<AgentReplyDraft[]> {
+    const texts: string[] = [];
+    let calls = 0;
+    const call = async (maxTokens?: number) => {
+      if (++calls > MAX_MODEL_CALLS_PER_TURN) throw new Error("Agent turn exceeded the model call limit");
+      return modelClient.createMessage(request(maxTokens));
+    };
+
+    for (;;) {
+      let response = await call();
+      if (response.stop_reason === "max_tokens" && hasToolUse(response.content)) {
+        // The tool input may be truncated: never run it. Nothing was appended, so retry with room.
+        response = await call(MAX_TOKENS * 2);
+        if (response.stop_reason === "max_tokens" && hasToolUse(response.content)) {
+          throw new Error("Agent reply truncated at max_tokens twice");
+        }
+      }
+
+      if (response.stop_reason === "refusal") {
+        // Never run tools from a refused turn, and never echo its (partial) content.
+        const category = response.stop_details?.category ?? "unspecified";
+        await ctx.recordTrace({ kind: "refusal", result: `Model declined (category: ${category})` });
+        turn.push(fixedAssistantTurn(MODEL_REFUSAL_REPLY));
+        return [{ kind: "model_refusal", text: MODEL_REFUSAL_REPLY }];
+      }
+
+      const content = echoableContent(response.content);
+      if (content.length === 0) {
+        turn.push(fixedAssistantTurn(AGENT_ERROR_REPLY));
+        return [{ kind: "agent_error", text: AGENT_ERROR_REPLY }];
+      }
+      turn.push({ role: "assistant", content });
+      const said = textOf(content);
+      if (said) texts.push(said);
+      const uses = content.filter((b): b is BetaToolUseBlock => b.type === "tool_use");
+      if (response.stop_reason !== "tool_use" || uses.length === 0) {
+        return texts.length > 0
+          ? [{ kind: "text", text: texts.join("\n\n") }]
+          : [{ kind: "agent_error", text: AGENT_ERROR_REPLY }];
+      }
+
+      const results: BetaToolResultBlockParam[] = [];
+      let endTurn: AgentReplyDraft | undefined;
+      // Sequential, so the trace and any propose -> confirm ordering are deterministic.
+      for (const use of uses) {
+        const ran = await runTool(use, ctx);
+        results.push(ran.block);
+        endTurn ??= ran.endTurn;
+      }
+      // All results for one assistant turn go back in ONE user message.
+      turn.push({ role: "user", content: results });
+      if (endTurn) {
+        // A fixed reply replaces model text; record it as the Agent's turn so
+        // the history shows what the Customer saw and stays valid.
+        turn.push(fixedAssistantTurn(endTurn.text));
+        return [endTurn];
+      }
+    }
+  }
+
   async function runCustomerTurn(
     sessionId: string,
     conversationId: string,
@@ -105,8 +178,8 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
       { role: "system", content: currentTimeNote(now) },
     ];
     const system = buildSystemPrompt(tools, startedAt);
-    const request = (): ModelRequest => ({
-      max_tokens: MAX_TOKENS,
+    const request = (maxTokens = MAX_TOKENS): ModelRequest => ({
+      max_tokens: maxTokens,
       thinking: { type: "adaptive" },
       output_config: { effort: "low" },
       tool_choice: { type: "auto" },
@@ -116,34 +189,17 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
       messages: [...history, ...turn],
     });
 
-    const texts: string[] = [];
-    let replies: AgentReplyDraft[] | undefined;
-    while (!replies) {
-      const response = await modelClient.createMessage(request());
-      turn.push({ role: "assistant", content: response.content });
-      const said = textOf(response.content);
-      if (said) texts.push(said);
-      if (response.stop_reason !== "tool_use") {
-        replies = [{ kind: "text", text: texts.join("\n\n") }];
-        break;
-      }
-
-      const uses = response.content.filter((b): b is BetaToolUseBlock => b.type === "tool_use");
-      const results: BetaToolResultBlockParam[] = [];
-      let endTurn: AgentReplyDraft | undefined;
-      // Sequential, so the trace and any propose -> confirm ordering are deterministic.
-      for (const use of uses) {
-        const ran = await runTool(use, ctx);
-        results.push(ran.block);
-        endTurn ??= ran.endTurn;
-      }
-      turn.push({ role: "user", content: results });
-      if (endTurn) {
-        // A fixed reply replaces model text; record it as the Agent's turn so
-        // the history shows what the Customer saw and stays valid.
-        turn.push({ role: "assistant", content: [{ type: "text", text: endTurn.text }] });
-        replies = [endTurn];
-      }
+    let replies: AgentReplyDraft[];
+    try {
+      replies = await runToolLoop(turn, request, ctx);
+    } catch (error) {
+      console.error("Agent turn failed", error);
+      await ctx.recordTrace({ kind: "error", result: error instanceof Error ? error.message : String(error) });
+      // Keep the history valid: drop an unanswered tool call, then close the turn.
+      const last = turn.at(-1);
+      if (last?.role === "assistant" && hasToolUse(last.content)) turn.pop();
+      if (turn.at(-1)?.role !== "assistant") turn.push(fixedAssistantTurn(AGENT_ERROR_REPLY));
+      replies = [{ kind: "agent_error", text: AGENT_ERROR_REPLY }];
     }
 
     await store.appendAgentHistory(db, ids, turn, clock.now());
@@ -166,6 +222,27 @@ function textOf(content: readonly BetaContentBlock[]): string {
     .map((b) => b.text.trim())
     .filter(Boolean)
     .join("\n\n");
+}
+
+function hasToolUse(content: BetaMessageParam["content"]): boolean {
+  return typeof content !== "string" && content.some((b) => b.type === "tool_use");
+}
+
+/** A synthetic assistant turn showing what the Customer was shown (keeps the history append-only and valid). */
+function fixedAssistantTurn(text: string): BetaMessageParam {
+  return { role: "assistant", content: [{ type: "text", text }] };
+}
+
+/**
+ * The assistant content to store and echo back, verbatim (thinking blocks
+ * included). After a server-side fallback, blocks before the last `fallback`
+ * block that the API says not to echo (thinking and client tool calls) are dropped.
+ */
+function echoableContent(content: readonly BetaContentBlock[]): BetaContentBlock[] {
+  const boundary = content.map((b) => b.type).lastIndexOf("fallback");
+  if (boundary < 0) return [...content];
+  const dropBefore = new Set(["thinking", "redacted_thinking", "tool_use"]);
+  return content.filter((b, i) => i >= boundary || !dropBefore.has(b.type));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

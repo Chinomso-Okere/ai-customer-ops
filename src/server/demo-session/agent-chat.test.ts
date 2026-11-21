@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { OFF_TOPIC_REFUSAL } from "@/server/agent";
+import {
+  AGENT_ERROR_REPLY,
+  MAX_MODEL_CALLS_PER_TURN,
+  MODEL_REFUSAL_REPLY,
+  OFF_TOPIC_REFUSAL,
+} from "@/server/agent";
 import { createHarness, london } from "@/server/testing/harness";
 import {
   ScriptedModelClient,
   assertValidMessages,
   lastToolResults,
+  refusal,
   reply,
   text,
   thinking,
@@ -125,5 +131,73 @@ describe("Agent chat", () => {
 
     expect((await b.service.getDashboardState(b.sessionId)).agentTrace).toEqual([]);
     expect((await a.service.getDashboardState(a.sessionId)).agentTrace).toHaveLength(1);
+  });
+
+  it("when the model refuses, the Customer gets the scripted reply, no tool runs, and the trace records it", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    model.script(
+      reply([toolCall("check_coverage_area", { postcode: "SW4 7AA" })]),
+      { ...refusal("general_harms"), content: [toolCall("check_coverage_area", { postcode: "SE5 1AA" })] },
+    );
+
+    const result = await service.sendCustomerMessage(sessionId, conversationId, "Do you cover SW4?");
+
+    expect(result.replies.map((r) => [r.kind, r.text])).toEqual([["model_refusal", MODEL_REFUSAL_REPLY]]);
+    const { agentTrace } = await service.getDashboardState(sessionId);
+    expect(agentTrace.map((e) => [e.kind, e.toolName])).toEqual([
+      ["tool_call", "check_coverage_area"],
+      ["refusal", null],
+    ]);
+    expect(agentTrace[1]!.result).toContain("general_harms");
+
+    model.script(reply([text("We cover SW4.")]));
+    const next = await service.sendCustomerMessage(sessionId, conversationId, "Sorry, I meant SW4?");
+    expect(next.replies.map((r) => r.kind)).toEqual(["text"]);
+  });
+
+  it("when the model can't be reached, the Customer gets an apology and the next turn still works", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    model.script(() => {
+      throw new Error("529 overloaded");
+    });
+
+    const result = await service.sendCustomerMessage(sessionId, conversationId, "Hello?");
+
+    expect(result.replies.map((r) => [r.kind, r.text])).toEqual([["agent_error", AGENT_ERROR_REPLY]]);
+    expect((await service.getDashboardState(sessionId)).agentTrace.map((e) => e.kind)).toEqual(["error"]);
+
+    model.script(reply([text("Hello! How can I help?")]));
+    const next = await service.sendCustomerMessage(sessionId, conversationId, "Hello again");
+    expect(next.replies.map((r) => r.kind)).toEqual(["text"]);
+    expect(next.conversation.map((m) => m.speaker)).toEqual(["Customer", "Agent", "Customer", "Agent"]);
+  });
+
+  it("a turn that keeps calling tools is stopped after a bounded number of model calls", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    const loop = () => reply([toolCall("check_coverage_area", { postcode: "SW4 7AA" })]);
+    model.script(...Array.from({ length: MAX_MODEL_CALLS_PER_TURN }, loop));
+
+    const result = await service.sendCustomerMessage(sessionId, conversationId, "SW4?");
+
+    expect(result.replies.map((r) => r.kind)).toEqual(["agent_error"]);
+    expect(model.requests.length).toBeLessThanOrEqual(MAX_MODEL_CALLS_PER_TURN);
+    model.script(reply([text("Yes.")]));
+    expect((await service.sendCustomerMessage(sessionId, conversationId, "SW4?")).replies[0]!.kind).toBe("text");
+  });
+
+  it("a reply cut off at max_tokens mid tool call is retried rather than running a truncated call", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    model.script(
+      reply([toolCall("check_coverage_area", { postcode: "SW" })], "max_tokens"),
+      reply([toolCall("check_coverage_area", { postcode: "SW4 7AA" })]),
+      reply([text("Yes, we cover SW4.")]),
+    );
+
+    await service.sendCustomerMessage(sessionId, conversationId, "SW4 7AA?");
+
+    const { agentTrace } = await service.getDashboardState(sessionId);
+    expect(agentTrace.map((e) => e.input)).toEqual([{ postcode: "SW4 7AA" }]);
+    expect(model.requests[1]!.max_tokens).toBeGreaterThan(model.requests[0]!.max_tokens);
+    expect(model.requests[1]!.messages).toEqual(model.requests[0]!.messages);
   });
 });
