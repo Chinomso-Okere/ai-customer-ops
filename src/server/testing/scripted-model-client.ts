@@ -33,6 +33,8 @@ export class ScriptedModelClient implements ModelClient {
 
   async createMessage(request: ModelRequest): Promise<ModelResponse> {
     this.requests.push(structuredClone(request));
+    // Fail like the real API would on an invalid history.
+    assertValidMessages(request.messages);
     const step = this.steps.shift();
     if (!step) throw new Error("ScriptedModelClient: no scripted step left");
     return typeof step === "function" ? step(request) : step;
@@ -74,6 +76,43 @@ export function refusal(category: "cyber" | "general_harms" | null = "general_ha
     stop_reason: "refusal",
     stop_details: { type: "refusal", category, explanation: null },
   } as unknown as ModelResponse;
+}
+
+/**
+ * Throws if `messages` breaks a Messages API placement rule the runner must
+ * respect (the real API answers these with a 400):
+ * - the first entry is a user message; no assistant prefill at the end;
+ * - assistant turns are non-empty and never back to back;
+ * - every tool_use is answered by tool_result blocks first in the next user message;
+ * - a system message follows a user message and is followed by an assistant
+ *   turn or ends the array.
+ */
+export function assertValidMessages(messages: readonly BetaMessageParam[]): void {
+  const fail = (i: number, why: string) => {
+    throw new Error(`Invalid Messages API history at [${i}]: ${why}`);
+  };
+  if (messages[0]?.role !== "user") fail(0, "the first message must be a user message");
+  if (messages.at(-1)?.role === "assistant") fail(messages.length - 1, "ends with an assistant prefill");
+  messages.forEach((m, i) => {
+    const prev = messages[i - 1];
+    const next = messages[i + 1];
+    if (m.role === "system") {
+      if (prev?.role !== "user") fail(i, "a system message must follow a user message");
+      if (next && next.role !== "assistant") fail(i, "a system message must be last or precede an assistant turn");
+    }
+    if (m.role === "assistant") {
+      if (prev?.role === "assistant") fail(i, "two assistant turns in a row");
+      if (typeof m.content !== "string" && m.content.length === 0) fail(i, "empty assistant content");
+      const uses = typeof m.content === "string" ? [] : m.content.filter((b) => b.type === "tool_use");
+      if (uses.length === 0) return;
+      if (!next) return; // the request being answered: tool results come next round
+      const answered =
+        next.role === "user" && typeof next.content !== "string"
+          ? next.content.filter((b) => b.type === "tool_result").map((b) => b.tool_use_id)
+          : [];
+      for (const u of uses) if (!answered.includes(u.id)) fail(i + 1, `tool_use ${u.id} has no tool_result`);
+    }
+  });
 }
 
 /** The tool_result blocks in the last message of a request (what the runner just returned). */

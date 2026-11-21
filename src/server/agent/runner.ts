@@ -46,7 +46,10 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
     input_schema: t.inputSchema,
   }));
 
-  async function runTool(use: BetaToolUseBlock, ctx: AgentTurnContext): Promise<BetaToolResultBlockParam> {
+  async function runTool(
+    use: BetaToolUseBlock,
+    ctx: AgentTurnContext,
+  ): Promise<{ block: BetaToolResultBlockParam; endTurn?: AgentReplyDraft }> {
     const tool = toolsByName.get(use.name);
     const input = isRecord(use.input) ? use.input : {};
     let outcome: ToolOutcome;
@@ -67,10 +70,13 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
       isError: !outcome.ok,
     });
     return {
-      type: "tool_result",
-      tool_use_id: use.id,
-      content,
-      ...(outcome.ok ? {} : { is_error: true }),
+      block: {
+        type: "tool_result",
+        tool_use_id: use.id,
+        content,
+        ...(outcome.ok ? {} : { is_error: true }),
+      },
+      ...(outcome.ok && outcome.endTurn ? { endTurn: outcome.endTurn } : {}),
     };
   }
 
@@ -111,20 +117,34 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
     });
 
     const texts: string[] = [];
-    for (;;) {
+    let replies: AgentReplyDraft[] | undefined;
+    while (!replies) {
       const response = await modelClient.createMessage(request());
       turn.push({ role: "assistant", content: response.content });
       const said = textOf(response.content);
       if (said) texts.push(said);
-      if (response.stop_reason !== "tool_use") break;
+      if (response.stop_reason !== "tool_use") {
+        replies = [{ kind: "text", text: texts.join("\n\n") }];
+        break;
+      }
 
       const uses = response.content.filter((b): b is BetaToolUseBlock => b.type === "tool_use");
       const results: BetaToolResultBlockParam[] = [];
+      let endTurn: AgentReplyDraft | undefined;
       // Sequential, so the trace and any propose -> confirm ordering are deterministic.
-      for (const use of uses) results.push(await runTool(use, ctx));
+      for (const use of uses) {
+        const ran = await runTool(use, ctx);
+        results.push(ran.block);
+        endTurn ??= ran.endTurn;
+      }
       turn.push({ role: "user", content: results });
+      if (endTurn) {
+        // A fixed reply replaces model text; record it as the Agent's turn so
+        // the history shows what the Customer saw and stays valid.
+        turn.push({ role: "assistant", content: [{ type: "text", text: endTurn.text }] });
+        replies = [endTurn];
+      }
     }
-    const replies: AgentReplyDraft[] = [{ kind: "text", text: texts.join("\n\n") }];
 
     await store.appendAgentHistory(db, ids, turn, clock.now());
     const stored: ChatMessage[] = [];

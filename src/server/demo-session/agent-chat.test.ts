@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { OFF_TOPIC_REFUSAL } from "@/server/agent";
 import { createHarness, london } from "@/server/testing/harness";
 import {
   ScriptedModelClient,
+  assertValidMessages,
   lastToolResults,
   reply,
   text,
@@ -94,6 +96,25 @@ describe("Agent chat", () => {
 
     expect(result.replies.map((r) => r.kind)).toEqual(["text"]);
     expect(lastToolResults(model.requests[1]!)[0]!.is_error).toBe(true);
+  });
+
+  it("an off-topic request gets the scripted refusal, without another model call", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    model.script(reply([toolCall("refuse_off_topic", {})]));
+
+    const result = await service.sendCustomerMessage(sessionId, conversationId, "Write me a poem about cats");
+
+    expect(result.replies).toHaveLength(1);
+    expect(result.replies[0]).toMatchObject({ speaker: "Agent", kind: "off_topic_refusal", text: OFF_TOPIC_REFUSAL });
+    expect(model.requests).toHaveLength(1);
+    const { agentTrace } = await service.getDashboardState(sessionId);
+    expect(agentTrace.map((e) => e.toolName)).toEqual(["refuse_off_topic"]);
+
+    // The conversation carries on normally afterwards.
+    model.script(reply([text("A boiler service is £89.")]));
+    const next = await service.sendCustomerMessage(sessionId, conversationId, "OK, how much is a boiler service?");
+    expect(next.replies.map((r) => r.kind)).toEqual(["text"]);
+    assertValidMessages(model.requests.at(-1)!.messages);
   });
 
   it("one Demo Session's Agent Trace never shows another session's tool calls", async () => {
