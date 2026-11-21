@@ -137,3 +137,90 @@ describe("Parts Arrived → fitting Visit offer", () => {
     expect(details.result.fittingVisitOffer.guidance).toMatch(/propose_fitting_visit/);
   });
 });
+
+describe("Booking the fitting Visit", () => {
+  /** Part Arrived, Customer asked, and picked the first offered window. */
+  async function proposeFitting(h: ChatHarness) {
+    const { job, order } = await verifiedSarah(h);
+    await h.service.advancePartsStatus(h.sessionId, order.id, "Dispatched");
+    const details = await toolTurn(h, "Any news?", "get_job_details", { jobReference: job.jobReference });
+    if (!details.ok) throw new Error(details.error);
+    const window = details.result.fittingVisitOffer.windows[0];
+    const proposal = await toolTurn(h, "Yes, the first one please", "propose_fitting_visit", {
+      jobReference: job.jobReference,
+      date: window.date,
+      timeWindow: window.timeWindow,
+    });
+    return { job, window, proposal };
+  }
+
+  it("the proposal reads back the fitting Visit and writes nothing until the Customer confirms", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { job, window, proposal } = await proposeFitting(h);
+
+    expect(proposal.ok).toBe(true);
+    if (!proposal.ok) return;
+    expect(proposal.result.readBack).toMatchObject({
+      jobReference: job.jobReference,
+      partName: "Diverter valve",
+      date: window.date,
+      timeWindow: window.timeWindow,
+    });
+    const state = await h.service.getDashboardState(h.sessionId);
+    const after = state.jobs.find((j) => j.id === job.id)!;
+    expect(after.jobStatus).toBe("Awaiting Parts");
+    expect(after.visits).toHaveLength(job.visits.length);
+  });
+
+  it("confirming books the Visit on the calendar and returns the Job to Scheduled", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { job, window, proposal } = await proposeFitting(h);
+    if (!proposal.ok) throw new Error(proposal.error);
+
+    const confirmed = await toolTurn(h, "Yes that's right", "confirm_action", {
+      pendingActionId: proposal.result.pendingActionId,
+    });
+
+    expect(confirmed.ok).toBe(true);
+    const state = await h.service.getDashboardState(h.sessionId);
+    const after = state.jobs.find((j) => j.id === job.id)!;
+    expect(after.jobStatus).toBe("Scheduled");
+    expect(after.visits).toHaveLength(job.visits.length + 1);
+    const onCalendar = state.calendar.visits.find(
+      (v) => v.jobReference === job.jobReference && v.date === window.date && v.timeWindow === window.timeWindow,
+    )!;
+    expect(onCalendar).toMatchObject({ jobStatus: "Scheduled", customerName: "Sarah Mitchell" });
+    const engineer = state.calendar.engineers.find((e) => e.id === onCalendar.engineerId)!;
+    expect(engineer.skills).toContain("Boiler Repair");
+  });
+
+  it("is refused while the part hasn't Arrived", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { job } = await verifiedSarah(h);
+
+    const proposal = await toolTurn(h, "Can you book the fitting?", "propose_fitting_visit", {
+      jobReference: job.jobReference,
+      date: "2026-11-19",
+      timeWindow: "AM",
+    });
+
+    expect(proposal.ok).toBe(false);
+  });
+
+  it("is refused for an unverified Customer", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const state = await h.service.getDashboardState(h.sessionId);
+    // Emma Clarke's seeded Boiler PCB has already Arrived.
+    const emmaJob = state.jobs.find((j) => j.customer.fullName === "Emma Clarke" && j.jobStatus === "Awaiting Parts")!;
+
+    const proposal = await toolTurn(h, "Book my fitting", "propose_fitting_visit", {
+      jobReference: emmaJob.jobReference,
+      date: "2026-11-19",
+      timeWindow: "AM",
+    });
+
+    expect(proposal.ok).toBe(false);
+    if (proposal.ok) return;
+    expect(proposal.error).toMatch(/verify_customer/);
+  });
+});

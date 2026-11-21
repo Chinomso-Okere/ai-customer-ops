@@ -3,6 +3,7 @@ import { checkCoverageArea } from "./check-coverage-area";
 import { confirmActionTool } from "./confirm-action";
 import { getAvailability } from "./get-availability";
 import { proposeBooking } from "./propose-booking";
+import { proposeFittingVisit } from "./propose-fitting-visit";
 import { refuseOffTopic } from "./refuse-off-topic";
 import { getJobDetails } from "./get-job-details";
 import { verifyCustomer } from "./verify-customer";
@@ -20,4 +21,5 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
   confirmActionTool,
   verifyCustomer,
   getJobDetails,
+  proposeFittingVisit,
 ];
