@@ -2,8 +2,10 @@ import {
   AGENT_TOOLS,
   PRE_MODEL_HOOKS,
   createAgentRunner,
+  type AgentTool,
   type ChatMessage,
   type CustomerTurnResult,
+  type PreModelHook,
 } from "@/server/agent";
 import * as conversations from "@/server/agent/conversation-store";
 import type { Clock } from "@/server/clock";
@@ -17,6 +19,10 @@ export interface DemoSessionServiceDeps {
   db: Database;
   clock: Clock;
   modelClient: ModelClient;
+  /** Overrides the tool registry (`src/server/agent/tools`). Tests of the runner's mechanics only. */
+  agentTools?: readonly AgentTool[];
+  /** Overrides the pre-model hook registry (`src/server/agent/hooks`). Tests of the runner's mechanics only. */
+  preModelHooks?: readonly PreModelHook[];
 }
 
 /** How long a Demo Session lives before it expires and cleanup may delete it. */
@@ -63,8 +69,8 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
     db,
     clock,
     modelClient: deps.modelClient,
-    tools: AGENT_TOOLS,
-    preModelHooks: PRE_MODEL_HOOKS,
+    tools: deps.agentTools ?? AGENT_TOOLS,
+    preModelHooks: deps.preModelHooks ?? PRE_MODEL_HOOKS,
   });
   const conversationLocks = new Map<string, Promise<unknown>>();
 

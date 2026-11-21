@@ -1,4 +1,6 @@
+import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { describe, expect, it } from "vitest";
+import type { AgentTool, PreModelHook } from "@/server/agent";
 import {
   AGENT_ERROR_REPLY,
   MAX_MODEL_CALLS_PER_TURN,
@@ -259,6 +261,78 @@ describe("Agent chat", () => {
       const system = JSON.stringify(model.requests[0]!.system);
       for (const figure of ["£95", "£89", "£75", "£120"]) expect(system).toContain(figure);
       expect(system).toMatch(/heat pump survey: free/i);
+    });
+  });
+
+  describe("extension points for domain tools and pre-model hooks", () => {
+    const systemMessagesAfterLastCustomerMessage = (messages: BetaMessageParam[]) => {
+      const i = messages.findLastIndex((m) => m.role === "user" && typeof m.content === "string");
+      return messages.slice(i + 1).filter((m) => m.role === "system").map((m) => JSON.stringify(m.content));
+    };
+
+    it("a system note queued by a tool reaches the model right after the next Customer message, once", async () => {
+      const seqs: number[] = [];
+      const raiseFlag: AgentTool = {
+        name: "raise_flag",
+        description: "test tool",
+        inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+        async run(_input, ctx) {
+          seqs.push(ctx.customerMessage.seq);
+          await ctx.enqueueSystemNote("Ticket APX-H-0003 is open. Do not book.");
+          return { ok: true, result: { raised: true } };
+        },
+      };
+      const model = new ScriptedModelClient();
+      const h = await createHarness({ now: WEDNESDAY, modelClient: model, agentTools: [raiseFlag] });
+      const sessionId = await h.service.createDemoSession();
+      const conversationId = await h.service.openConversation(sessionId, undefined);
+
+      model.script(reply([toolCall("raise_flag", {})]), reply([text("Raised.")]));
+      await h.service.sendCustomerMessage(sessionId, conversationId, "first");
+      model.script(reply([text("Noted.")]));
+      await h.service.sendCustomerMessage(sessionId, conversationId, "second");
+      model.script(reply([text("Still noted.")]));
+      await h.service.sendCustomerMessage(sessionId, conversationId, "third");
+
+      const notesIn = (request: number) =>
+        systemMessagesAfterLastCustomerMessage(model.requests[request]!.messages).join(" ");
+      expect(notesIn(1)).not.toContain("APX-H-0003"); // same turn: not yet
+      expect(notesIn(2)).toContain("APX-H-0003"); // delivered with the next Customer message
+      expect(notesIn(3)).not.toContain("APX-H-0003"); // not repeated…
+      expect(JSON.stringify(model.requests[3]!.messages)).toContain("APX-H-0003"); // …but kept in history
+      expect(seqs).toHaveLength(1);
+    });
+
+    it("a pre-model hook can handle a turn without calling the model; the conversation carries on", async () => {
+      const prefilter: PreModelHook = async (ctx) => {
+        if (!ctx.customerMessage.text.includes("smell gas")) return undefined;
+        await ctx.recordTrace({ kind: "emergency_prefilter", result: "gas_or_co" });
+        await ctx.enqueueSystemNote("Emergency ticket open. Do not book.");
+        return {
+          replies: [{ kind: "text", text: "Leave the property and call 0800 111 999." }],
+          historyNote: "[Safety Script shown]",
+        };
+      };
+      const model = new ScriptedModelClient();
+      const h = await createHarness({ now: WEDNESDAY, modelClient: model, preModelHooks: [prefilter] });
+      const sessionId = await h.service.createDemoSession();
+      const conversationId = await h.service.openConversation(sessionId, undefined);
+
+      const handled = await h.service.sendCustomerMessage(sessionId, conversationId, "I smell gas");
+      expect(handled.replies.map((r) => r.text)).toEqual(["Leave the property and call 0800 111 999."]);
+      expect(model.requests).toHaveLength(0);
+      expect((await h.service.getDashboardState(sessionId)).agentTrace.map((e) => e.kind)).toEqual([
+        "emergency_prefilter",
+      ]);
+
+      model.script(reply([text("A boiler service is £89.")]));
+      const next = await h.service.sendCustomerMessage(sessionId, conversationId, "How much is a service?");
+      expect(next.replies.map((r) => r.kind)).toEqual(["text"]);
+      const messages = model.requests[0]!.messages;
+      expect(JSON.stringify(messages)).toContain("I smell gas");
+      expect(JSON.stringify(messages)).toContain("[Safety Script shown]");
+      expect(systemMessagesAfterLastCustomerMessage(messages).join(" ")).toContain("Emergency ticket open");
+      expect(next.conversation.map((m) => m.speaker)).toEqual(["Customer", "Agent", "Customer", "Agent"]);
     });
   });
 

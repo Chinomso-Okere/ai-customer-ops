@@ -173,9 +173,33 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
     };
 
     const history = await store.readAgentHistory(db, sessionId, conversationId);
+    const finish = async (turn: BetaMessageParam[], replies: AgentReplyDraft[]) => {
+      await store.appendAgentHistory(db, ids, turn, clock.now());
+      const stored: ChatMessage[] = [];
+      for (const r of replies) {
+        stored.push((await store.appendChatMessage(db, ids, "Agent", r, clock.now())).message);
+      }
+      return stored;
+    };
+
+    for (const hook of deps.preModelHooks) {
+      const outcome = await hook(ctx);
+      if (!outcome) continue;
+      // Handled without the model. Pending system notes stay queued for the
+      // next model turn: a system message must be followed by an assistant
+      // turn, and a synthetic one is all this turn has.
+      return finish(
+        [{ role: "user", content: text }, fixedAssistantTurn(outcome.historyNote)],
+        outcome.replies,
+      );
+    }
+
+    // Harness notices go right after the Customer's words, at the start of the
+    // turn (the most robust spot on Sonnet 5.5): the time, then queued notes.
+    const notes = [currentTimeNote(now), ...(await store.takePendingSystemNotes(db, sessionId, conversationId))];
     const turn: BetaMessageParam[] = [
       { role: "user", content: text },
-      { role: "system", content: currentTimeNote(now) },
+      { role: "system", content: notes.join("\n") },
     ];
     const system = buildSystemPrompt(tools, startedAt);
     const request = (maxTokens = MAX_TOKENS): ModelRequest => ({
@@ -201,13 +225,7 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
       if (turn.at(-1)?.role !== "assistant") turn.push(fixedAssistantTurn(AGENT_ERROR_REPLY));
       replies = [{ kind: "agent_error", text: AGENT_ERROR_REPLY }];
     }
-
-    await store.appendAgentHistory(db, ids, turn, clock.now());
-    const stored: ChatMessage[] = [];
-    for (const r of replies) {
-      stored.push((await store.appendChatMessage(db, ids, "Agent", r, clock.now())).message);
-    }
-    return stored;
+    return finish(turn, replies);
   }
 
   return { runCustomerTurn };
@@ -225,7 +243,7 @@ function textOf(content: readonly BetaContentBlock[]): string {
 }
 
 function hasToolUse(content: BetaMessageParam["content"]): boolean {
-  return typeof content !== "string" && content.some((b) => b.type === "tool_use");
+  return Array.isArray(content) && content.some((b) => b.type === "tool_use");
 }
 
 /** A synthetic assistant turn showing what the Customer was shown (keeps the history append-only and valid). */
