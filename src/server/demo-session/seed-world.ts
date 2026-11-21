@@ -7,7 +7,7 @@ import {
 } from "@/domain/london-time";
 import { timeWindowStart, type TimeWindow } from "@/domain/time-window";
 import type { Database } from "@/server/db/database";
-import { CUSTOMERS, ENGINEERS, JOBS, type JobSeed } from "./seed-data";
+import { CUSTOMERS, ENGINEERS, HANDOFF_TICKETS, JOBS, type JobSeed } from "./seed-data";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -42,6 +42,7 @@ export async function seedWorld(tx: Database, sessionId: string, now: Date): Pro
   // Job References count up in the order Jobs were raised.
   const raised = JOBS.map((job, i) => ({ job, i, createdAt: jobRaisedAt(job, i, today, now) }));
   const byAge = [...raised].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const jobIds: string[] = [];
   for (const [rank, { job, i, createdAt }] of byAge.entries()) {
     const { rows } = await tx.query<{ id: string }>(
       `INSERT INTO job (session_id, job_reference, customer_id, issue_type, description, job_status, created_at)
@@ -56,6 +57,7 @@ export async function seedWorld(tx: Database, sessionId: string, now: Date): Pro
         createdAt,
       ],
     );
+    jobIds[i] = rows[0]!.id;
     for (const v of visitPlan[i]!) {
       await tx.query(
         `INSERT INTO visit (session_id, job_id, engineer_id, visit_date, time_window)
@@ -77,6 +79,25 @@ export async function seedWorld(tx: Database, sessionId: string, now: Date): Pro
         ],
       );
     }
+  }
+
+  for (const [n, t] of HANDOFF_TICKETS.entries()) {
+    await tx.query(
+      `INSERT INTO handoff_ticket (session_id, ticket_number, customer_id, job_id, escalation_reason,
+                                   urgency, status, summary, recommended_next_step, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'Open', $7, $8, $9)`,
+      [
+        sessionId,
+        n + 1,
+        customerIds[JOBS[t.job]!.customer],
+        jobIds[t.job],
+        t.escalationReason,
+        t.urgency,
+        t.summary,
+        t.recommendedNextStep,
+        new Date(now.getTime() - t.openedHoursAgo * 60 * 60 * 1000),
+      ],
+    );
   }
 }
 

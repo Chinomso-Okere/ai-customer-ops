@@ -45,4 +45,14 @@ describe("Operations Dashboard state", () => {
     expect(shown.length).toBeGreaterThan(0);
     expect(shown).toEqual(expected);
   });
+
+  it("the Handoff Ticket queue puts higher Urgency first, even ahead of older tickets", async () => {
+    const state = await seededState(london("2026-11-18T09:15"));
+
+    // Seed: a High Complaint opened 3h ago and a Normal Out of Policy opened 26h ago.
+    expect(state.handoffTickets.map((t) => [t.urgency, t.escalationReason])).toEqual([
+      ["High", "Complaint"],
+      ["Normal", "Out of Policy"],
+    ]);
+  });
 });

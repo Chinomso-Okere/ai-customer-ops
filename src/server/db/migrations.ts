@@ -73,6 +73,21 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
         created_at       timestamptz NOT NULL
       );
       CREATE INDEX parts_order_session_idx ON parts_order (session_id);
+
+      CREATE TABLE handoff_ticket (
+        id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id            uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        ticket_number         int NOT NULL,
+        customer_id           uuid REFERENCES customer(id) ON DELETE CASCADE,
+        job_id                uuid REFERENCES job(id) ON DELETE CASCADE,
+        escalation_reason     text NOT NULL,
+        urgency               text NOT NULL,
+        status                text NOT NULL,
+        summary               text NOT NULL,
+        recommended_next_step text NOT NULL,
+        created_at            timestamptz NOT NULL,
+        UNIQUE (session_id, ticket_number)
+      );
     `,
   },
 ];

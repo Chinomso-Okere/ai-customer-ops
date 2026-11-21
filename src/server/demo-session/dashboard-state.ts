@@ -6,7 +6,15 @@ import {
   type PlainDate,
 } from "@/domain/london-time";
 import type { TimeWindow } from "@/domain/time-window";
-import type { IssueType, JobStatus, PartsStatus } from "@/domain/vocabulary";
+import {
+  URGENCIES,
+  type EscalationReason,
+  type HandoffTicketStatus,
+  type IssueType,
+  type JobStatus,
+  type PartsStatus,
+  type Urgency,
+} from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
 
 export interface DashboardEngineer {
@@ -73,6 +81,22 @@ export interface DashboardState {
   jobs: DashboardJob[];
   /** Soonest expected arrival first. */
   partsOrders: DashboardPartsOrder[];
+  /** The queue: most urgent first, then oldest first. */
+  handoffTickets: DashboardHandoffTicket[];
+}
+
+export interface DashboardHandoffTicket {
+  id: string;
+  /** e.g. "APX-H-0001". */
+  ticketReference: string;
+  escalationReason: EscalationReason;
+  urgency: Urgency;
+  status: HandoffTicketStatus;
+  summary: string;
+  recommendedNextStep: string;
+  createdAt: string;
+  customer: DashboardCustomer | null;
+  jobReference: string | null;
 }
 
 export interface DashboardPartsOrder {
@@ -187,12 +211,57 @@ export async function readDashboardState(
     [sessionId],
   );
 
+  const tickets = await db.query<{
+    id: string;
+    ticket_number: number;
+    escalation_reason: EscalationReason;
+    urgency: Urgency;
+    status: HandoffTicketStatus;
+    summary: string;
+    recommended_next_step: string;
+    created_at: Date;
+    full_name: string | null;
+    postcode: string | null;
+    email: string | null;
+    job_reference: string | null;
+  }>(
+    `SELECT t.id, t.ticket_number, t.escalation_reason, t.urgency, t.status, t.summary,
+            t.recommended_next_step, t.created_at,
+            c.full_name, c.postcode, c.email, j.job_reference
+       FROM handoff_ticket t
+       LEFT JOIN customer c ON c.id = t.customer_id AND c.session_id = t.session_id
+       LEFT JOIN job j ON j.id = t.job_id AND j.session_id = t.session_id
+      WHERE t.session_id = $1
+      ORDER BY array_position($2::text[], t.urgency), t.created_at, t.ticket_number`,
+    [sessionId, URGENCIES],
+  );
+
   return {
     sessionId,
     calendar: { days, engineers: engineers.rows, visits: calendarVisits },
     jobs: dashboardJobs,
     partsOrders: partsOrders.rows,
+    handoffTickets: tickets.rows.map((t) => ({
+      id: t.id,
+      ticketReference: handoffTicketReference(t.ticket_number),
+      escalationReason: t.escalation_reason,
+      urgency: t.urgency,
+      status: t.status,
+      summary: t.summary,
+      recommendedNextStep: t.recommended_next_step,
+      createdAt: t.created_at.toISOString(),
+      customer:
+        t.full_name && t.postcode && t.email
+          ? { fullName: t.full_name, postcode: t.postcode, email: t.email }
+          : null,
+      jobReference: t.job_reference,
+    })),
   };
+}
+
+/** The Operator-facing Handoff Ticket reference, numbered per Demo Session. */
+export function handoffTicketReference(ticketNumber: number): string {
+  return `APX-H-${String(ticketNumber).padStart(4, "0")}`;
 }
 
 function calendarDays(today: PlainDate): CalendarDay[] {

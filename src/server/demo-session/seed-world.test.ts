@@ -56,6 +56,23 @@ describe("seed world", () => {
     for (const p of state.partsOrders) expect(jobReferences).toContain(p.jobReference);
   });
 
+  it("has 2 already-open Handoff Tickets opened shortly before the session was created", async () => {
+    const now = london("2026-11-18T09:15");
+    const state = await seededState(now);
+
+    expect(state.handoffTickets).toHaveLength(2);
+    for (const ticket of state.handoffTickets) {
+      expect(ticket.status).toBe("Open");
+      expect(ticket.ticketReference).toMatch(/^APX-H-\d{4}$/);
+      expect(ticket.customer?.fullName).toBeTruthy();
+      expect(ticket.summary).toBeTruthy();
+      expect(ticket.recommendedNextStep).toBeTruthy();
+      const ageHours = (now.getTime() - new Date(ticket.createdAt).getTime()) / 3_600_000;
+      expect(ageHours).toBeGreaterThan(0);
+      expect(ageHours).toBeLessThan(48);
+    }
+  });
+
   describe.each([
     ["Wednesday morning", london("2026-11-18T09:15")],
     ["Friday afternoon", london("2026-11-20T16:30")],
