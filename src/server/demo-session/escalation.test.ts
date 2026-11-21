@@ -132,6 +132,38 @@ describe("Complaint and Out of Policy escalations (create_handoff_ticket)", () =
   });
 });
 
+describe("Handoff Ticket transcript", () => {
+  it("an Operator can read the full conversation a ticket was raised from, including later messages", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    h.model.script(reply([text("Hello! How can I help?")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "Hi");
+    await toolTurn(h, "Your engineer was rude", "create_handoff_ticket", complaint);
+    const [ticket] = await ticketsOf(h);
+    h.model.script(reply([text("A boiler service is £89.")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "How much is a service?");
+
+    const transcript = await h.service.getHandoffTicketTranscript(h.sessionId, ticket!.id);
+
+    expect(transcript.map((m) => [m.speaker, m.text])).toEqual([
+      ["Customer", "Hi"],
+      ["Agent", "Hello! How can I help?"],
+      ["Customer", "Your engineer was rude"],
+      ["Agent", "(scripted Agent reply)"],
+      ["Customer", "How much is a service?"],
+      ["Agent", "A boiler service is £89."],
+    ]);
+  });
+
+  it("a seed ticket has no transcript; an unknown ticket is not found", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    const [seed] = (await h.service.getDashboardState(h.sessionId)).handoffTickets;
+    expect(await h.service.getHandoffTicketTranscript(h.sessionId, seed!.id)).toEqual([]);
+    await expect(h.service.getHandoffTicketTranscript(h.sessionId, crypto.randomUUID())).rejects.toBeInstanceOf(
+      HandoffTicketNotFoundError,
+    );
+  });
+});
+
 describe("Operators Acknowledge and Resolve Handoff Tickets", () => {
   it("Acknowledge then Resolve change the ticket's status in getDashboardState, with timeline entries", async () => {
     const h = await chatHarness(WEDNESDAY);

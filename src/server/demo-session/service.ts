@@ -19,6 +19,7 @@ import {
   DemoSessionNotFoundError,
   DemoSessionRateLimitedError,
   EmptyCustomerMessageError,
+  HandoffTicketNotFoundError,
 } from "./errors";
 import { seedWorld } from "./seed-world";
 
@@ -98,6 +99,12 @@ export interface DemoSessionService {
    * @throws DemoSessionNotFoundError, HandoffTicketNotFoundError
    */
   resolveHandoffTicket(sessionId: string, ticketId: string): Promise<void>;
+  /**
+   * The full Customer-visible transcript of the conversation a Handoff Ticket
+   * was raised from (as it stands now); empty for seed tickets.
+   * @throws DemoSessionNotFoundError, HandoffTicketNotFoundError
+   */
+  getHandoffTicketTranscript(sessionId: string, ticketId: string): Promise<ChatMessage[]>;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -225,6 +232,20 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
     async resolveHandoffTicket(sessionId, ticketId) {
       await requireLive(sessionId);
       await changeHandoffTicketStatus(db, { sessionId, ticketId, action: "resolve", now: clock.now() });
+    },
+
+    async getHandoffTicketTranscript(sessionId, ticketId) {
+      await requireLive(sessionId);
+      const { rows } = UUID.test(ticketId)
+        ? await db.query<{ conversation_id: string | null }>(
+            "SELECT conversation_id FROM handoff_ticket WHERE session_id = $1 AND id = $2",
+            [sessionId, ticketId],
+          )
+        : { rows: [] };
+      const ticket = rows[0];
+      if (!ticket) throw new HandoffTicketNotFoundError(ticketId);
+      if (!ticket.conversation_id) return [];
+      return conversations.readChatMessages(db, sessionId, ticket.conversation_id);
     },
   };
   return service;
