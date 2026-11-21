@@ -95,6 +95,19 @@ describe("seed world", () => {
     ).toBe(true);
   });
 
+  it("every Demo Session offers the same demo-friendly Customers, so the scenario tray's details always work", async () => {
+    const { service } = await createHarness({ now: WEDNESDAY });
+    const first = await service.getDashboardState(await service.createDemoSession());
+    const afterReset = await service.getDashboardState(await service.createDemoSession());
+
+    expect(first.demoCustomers.map(({ fullName, postcode, email }) => ({ fullName, postcode, email }))).toEqual([
+      { fullName: "Emma Clarke", postcode: "SW11 2PL", email: "emma.clarke@example.com" },
+      { fullName: "James Patel", postcode: "SE15 4QF", email: "james.patel@example.com" },
+      { fullName: "Sarah Mitchell", postcode: "SW4 7AB", email: "sarah.mitchell@example.com" },
+    ]);
+    expect(afterReset.demoCustomers).toEqual(first.demoCustomers);
+  });
+
   describe.each([
     ["Wednesday morning", london("2026-11-18T09:15")],
     ["Friday afternoon", london("2026-11-20T16:30")],

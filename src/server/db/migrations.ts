@@ -155,7 +155,22 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
     `,
   },
   {
-    id: "0003_t5_pending_action",
+    id: "0003_t6_verification",
+    sql: `
+      -- Verification state per conversation (#6): who the Customer proved they
+      -- are, and how many failed attempts they have made (3 = locked).
+      CREATE TABLE conversation_verification (
+        conversation_id      uuid PRIMARY KEY REFERENCES conversation(id) ON DELETE CASCADE,
+        session_id           uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        verified_customer_id uuid REFERENCES customer(id) ON DELETE CASCADE,
+        failed_attempts      int NOT NULL DEFAULT 0,
+        updated_at           timestamptz NOT NULL
+      );
+      CREATE INDEX conversation_verification_session_idx ON conversation_verification (session_id);
+    `,
+  },
+  {
+    id: "0005_t5_pending_action",
     sql: `
       -- Two-phase Confirmation: a write the Agent has proposed (book,
       -- reschedule, cancel...) and read back, awaiting the Customer's reply.
