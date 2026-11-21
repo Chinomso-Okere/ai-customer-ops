@@ -1,4 +1,5 @@
-import { isInCoverageArea, normalisePostcode, outwardCode } from "@/domain/coverage-area";
+import { formatPostcode, isInCoverageArea, normalisePostcode, outwardCode } from "@/domain/coverage-area";
+import { escalateCapacity } from "../out-of-policy";
 import { ISSUE_TYPES, parseIssueType } from "@/domain/vocabulary";
 import {
   OFFERED_WINDOWS,
@@ -42,6 +43,7 @@ export const getAvailability: AgentTool = {
         postcode,
         windows: windows.map(windowForModel),
         searchedUntil: until,
+        ...(windows.length === 0 && { escalation: await escalateCapacity(ctx, issueType, formatPostcode(postcode), until) }),
       },
     };
   },

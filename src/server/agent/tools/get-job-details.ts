@@ -7,7 +7,7 @@ import type { AgentTool } from "../types";
 export const getJobDetails: AgentTool = {
   name: "get_job_details",
   description:
-    "Looks up a Job's status, upcoming Visits (date and Time Window), assigned Engineer's first name and any Parts Orders with their Parts Status. Only works after verify_customer has succeeded in this conversation, and only for that Customer's Jobs.",
+    "Looks up a Job's status, upcoming Visits (visitId, date and Time Window; use visitId to reschedule or cancel), assigned Engineer's first name and any Parts Orders with their Parts Status. Only works after verify_customer has succeeded in this conversation, and only for that Customer's Jobs.",
   inputSchema: {
     type: "object",
     properties: {

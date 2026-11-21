@@ -260,4 +260,64 @@ describe("Reschedule and cancel: guardrails", () => {
 
     expect(res.ok).toBe(false);
   });
+
+  it("a moved Visit frees its old window and takes the new one", async () => {
+    const { h, visit } = await bookedAndVerified();
+    const count = async (w: { date: string; timeWindow: string }) =>
+      (await h.service.getDashboardState(h.sessionId)).calendar.visits.filter(
+        (v) => v.date === w.date && v.timeWindow === w.timeWindow,
+      ).length;
+    const MONDAY_PM = { date: "2026-11-23", timeWindow: "PM" };
+    const [fridayBefore, mondayBefore] = [await count(FRIDAY_AM), await count(MONDAY_PM)];
+
+    const proposal = await toolTurn(h, "Monday PM please", "propose_reschedule", { visitId: visit.visitId, ...MONDAY_PM });
+    if (!proposal.ok) throw new Error(proposal.error);
+    await toolTurn(h, "yes", "confirm_action", { pendingActionId: proposal.result.pendingActionId });
+
+    expect(await count(FRIDAY_AM)).toBe(fridayBefore - 1);
+    expect(await count(MONDAY_PM)).toBe(mondayBefore + 1);
+  });
+});
+
+describe("Capacity: no Availability within the 10-weekday horizon", () => {
+  const AC_CUSTOMER = { ...CUSTOMER, issueType: "AC Repair & Install" };
+
+  /**
+   * Fixture setup: fills every free AC Engineer cell in the horizon with a Visit.
+   * Done in the database because Booking ~20 windows through chat would exceed
+   * the Demo Session's message cap.
+   */
+  async function fillAcHorizon(h: ChatHarness) {
+    const { jobs, calendar } = await h.service.getDashboardState(h.sessionId);
+    const jobId = jobs[0]!.id;
+    const acEngineers = calendar.engineers.filter((e) => e.skills.includes("AC Repair & Install"));
+    await h.db.query(
+      `INSERT INTO visit (session_id, job_id, engineer_id, visit_date, time_window)
+       SELECT $1, $2, e, d::date, w
+         FROM unnest($3::uuid[]) e, generate_series($4::date, $5::date, '1 day') d, unnest(ARRAY['AM','PM']) w
+        WHERE extract(isodow FROM d) < 6
+       ON CONFLICT DO NOTHING`,
+      [h.sessionId, jobId, acEngineers.map((e) => e.id), "2026-11-18", "2026-12-04"],
+    );
+  }
+
+  it("a fully booked horizon is escalated server-side as an Out of Policy (capacity) ticket", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    await fillAcHorizon(h);
+    const customer: ChatHarness = { ...h, conversationId: await h.service.openConversation(h.sessionId, undefined) };
+
+    const res = await toolTurn(customer, "Can someone look at my AC?", "get_availability", {
+      issueType: AC_CUSTOMER.issueType,
+      postcode: AC_CUSTOMER.postcode,
+    });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.result.windows).toEqual([]);
+    expect(res.result.escalation).toMatchObject({ outOfPolicy: true, ticketReference: expect.stringMatching(/^APX-H-/) });
+    const tickets = await outOfPolicyTickets(customer);
+    expect(tickets).toHaveLength(1);
+    expect(tickets[0]).toMatchObject({ ticketReference: res.result.escalation.ticketReference, urgency: "Normal" });
+    expect(tickets[0]!.summary).toMatch(/AC Repair & Install/);
+  });
 });
