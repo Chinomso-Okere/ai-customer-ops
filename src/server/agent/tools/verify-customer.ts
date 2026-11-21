@@ -10,7 +10,7 @@ const LOCKED_GUIDANCE =
 export const verifyCustomer: AgentTool = {
   name: "verify_customer",
   description:
-    "Verifies the Customer's identity before anything about their Jobs is shared. Call it when the Customer wants to look up, check, change or ask about an existing Job, Visit or Parts Order. Make ONE call with every detail the Customer has given in this conversation: jobReference with postcode and/or email (Path A), or fullName, postcode and email together (Path B, when the Job Reference is lost). Pass details exactly as the Customer typed them and null for any they have not given. Never split one Customer's details across several calls. Only call it once the Customer has given a complete set.",
+    "Verifies the Customer's identity before anything about their Jobs is shared. Call it when the Customer wants to look up, check, change or ask about an existing Job, Visit or Parts Order. Make ONE call with every detail the Customer has given in this conversation: jobReference with postcode and/or email (Path A), or fullName, postcode and email together (Path B, no Job Reference needed). As soon as the Customer has given either set, call it straight away: don't ask for a Job Reference first, and don't judge whether a name looks right (the tool decides). Pass details exactly as the Customer typed them and null for any they have not given. Never split one Customer's details across several calls. Only call it once the Customer has given a complete set.",
   // Every field is required but nullable: strict tool use emits optional
   // properties in schema order, so with optional fields a call that starts with
   // a later field (e.g. fullName) can't carry the earlier ones (eval run 1).
