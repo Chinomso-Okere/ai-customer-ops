@@ -39,11 +39,11 @@ export const getJobDetails: AgentTool = {
       `SELECT job_reference, issue_type, description, job_status FROM job WHERE session_id = $1 AND id = $2`,
       [sessionId, jobId],
     );
-    const visits = await db.query<{ date: string; time_window: string; engineer_name: string; upcoming: boolean }>(
-      `SELECT v.visit_date::text AS date, v.time_window, e.name AS engineer_name, v.visit_date >= $3::date AS upcoming
+    const visits = await db.query<{ id: string; date: string; time_window: string; engineer_name: string; upcoming: boolean }>(
+      `SELECT v.id, v.visit_date::text AS date, v.time_window, e.name AS engineer_name, v.visit_date >= $3::date AS upcoming
          FROM visit v
          JOIN engineer e ON e.id = v.engineer_id AND e.session_id = v.session_id
-        WHERE v.session_id = $1 AND v.job_id = $2
+        WHERE v.session_id = $1 AND v.job_id = $2 AND v.cancelled_at IS NULL
         ORDER BY v.visit_date, v.time_window`,
       [sessionId, jobId, today],
     );
@@ -68,6 +68,7 @@ export const getJobDetails: AgentTool = {
         description: j.description,
         jobStatus: j.job_status,
         upcomingVisits: upcoming.map((v) => ({
+          visitId: v.id,
           date: v.date,
           timeWindow: v.time_window,
           engineerFirstName: firstName(v.engineer_name),

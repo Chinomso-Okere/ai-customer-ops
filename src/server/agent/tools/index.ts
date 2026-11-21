@@ -5,6 +5,8 @@ import { createHandoffTicket } from "./create-handoff-ticket";
 import { getAvailability } from "./get-availability";
 import { proposeBooking } from "./propose-booking";
 import { proposeFittingVisit } from "./propose-fitting-visit";
+import { proposeCancellation } from "./propose-cancellation";
+import { proposeReschedule } from "./propose-reschedule";
 import { refuseOffTopic } from "./refuse-off-topic";
 import { getJobDetails } from "./get-job-details";
 import { verifyCustomer } from "./verify-customer";
@@ -24,4 +26,6 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
   getJobDetails,
   createHandoffTicket,
   proposeFittingVisit,
+  proposeReschedule,
+  proposeCancellation,
 ];

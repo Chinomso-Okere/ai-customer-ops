@@ -236,6 +236,18 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
         ADD COLUMN possible_duplicate_of uuid REFERENCES customer(id) ON DELETE CASCADE;
     `,
   },
+  {
+    id: "0008_t14_visit_cancellation",
+    sql: `
+      -- A cancelled Visit stays as a record but no longer occupies its Engineer's
+      -- Time Window, is not busy in Availability and is off the calendar.
+      ALTER TABLE visit ADD COLUMN cancelled_at timestamptz;
+      DROP INDEX visit_engineer_window_uniq;
+      CREATE UNIQUE INDEX visit_engineer_window_uniq
+        ON visit (session_id, engineer_id, visit_date, time_window)
+        WHERE NOT is_emergency_visit AND cancelled_at IS NULL;
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.
