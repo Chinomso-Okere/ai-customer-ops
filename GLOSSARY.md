@@ -31,6 +31,7 @@ _Avoid_: Bot, chatbot, assistant
 **Job**:
 One unit of work for one Customer about one problem, from first contact to completion.
 _Avoid_: Appointment, booking, ticket, order
+_Exempt_: Identifiers the spec names (tool names such as `propose_booking`, pending-action kinds) keep their spec spelling; the _Avoid_ lists apply to prose, not to those identifiers.
 
 **Job Reference**:
 The customer-facing identifier of a Job, e.g. `APX-10482`.
