@@ -136,7 +136,7 @@ export function DemoApp() {
           )}
           {error && <p className="banner banner--error">{error}</p>}
           {state ? (
-            <OperationsDashboard state={state} />
+            <OperationsDashboard state={state} onChanged={() => void refresh().catch(showFailure)} />
           ) : (
             !notice && <p className="muted">Starting your Demo Session…</p>
           )}

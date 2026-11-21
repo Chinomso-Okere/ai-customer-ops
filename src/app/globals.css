@@ -163,3 +163,8 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); }
 .bubble--message_cap { background: #fff4d6; border-color: #f5d98b; }
 .chat__start-new-demo { align-self: flex-start; }
 .banner--notice { background: #fff4d6; color: #5c4400; }
+
+/* Status advance buttons (#12) */
+.advance-button { font: inherit; font-size: 12px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: inherit; cursor: pointer; white-space: nowrap; }
+.advance-button:hover:not(:disabled) { border-color: var(--muted); }
+.advance-button:disabled { opacity: 0.6; cursor: default; }

@@ -6,7 +6,8 @@ import { PartsOrdersList } from "./PartsOrdersList";
 import { VisitCalendar } from "./VisitCalendar";
 
 /** The Operator's view of the Demo Session: a thin render of live state. */
-export function OperationsDashboard({ state }: { state: DashboardState }) {
+/** `onChanged`: the Operator changed something (e.g. advanced a status); re-read the state now. */
+export function OperationsDashboard({ state, onChanged }: { state: DashboardState; onChanged?: () => void }) {
   return (
     <div className="ops">
       <h2 className="ops__title">Operations Dashboard</h2>
@@ -14,8 +15,8 @@ export function OperationsDashboard({ state }: { state: DashboardState }) {
       <AgentTracePanel entries={state.agentTrace} />
       <VisitCalendar calendar={state.calendar} />
       <div className="ops__lists">
-        <JobsList jobs={state.jobs} />
-        <PartsOrdersList partsOrders={state.partsOrders} />
+        <JobsList jobs={state.jobs} onChanged={onChanged} />
+        <PartsOrdersList partsOrders={state.partsOrders} onChanged={onChanged} />
       </div>
     </div>
   );
