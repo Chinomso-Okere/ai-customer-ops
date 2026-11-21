@@ -7,6 +7,7 @@ import {
   MODEL_REFUSAL_REPLY,
   OFF_TOPIC_REFUSAL,
 } from "@/server/agent";
+import { ConversationNotFoundError, EmptyCustomerMessageError } from "@/server/demo-session";
 import { createHarness, london } from "@/server/testing/harness";
 import {
   ScriptedModelClient,
@@ -334,6 +335,33 @@ describe("Agent chat", () => {
       expect(systemMessagesAfterLastCustomerMessage(messages).join(" ")).toContain("Emergency ticket open");
       expect(next.conversation.map((m) => m.speaker)).toEqual(["Customer", "Agent", "Customer", "Agent"]);
     });
+  });
+
+  it("a conversation belongs to its Demo Session: another session can't read or write it", async () => {
+    const a = await chatHarness();
+    a.model.script(reply([text("Hello!")]));
+    await a.service.sendCustomerMessage(a.sessionId, a.conversationId, "Hi");
+    const b = await chatHarness();
+
+    await expect(b.service.getConversation(b.sessionId, a.conversationId)).rejects.toBeInstanceOf(
+      ConversationNotFoundError,
+    );
+    await expect(b.service.sendCustomerMessage(b.sessionId, a.conversationId, "Hi")).rejects.toBeInstanceOf(
+      ConversationNotFoundError,
+    );
+    // Opening someone else's conversation id starts a fresh one instead.
+    const opened = await b.service.openConversation(b.sessionId, a.conversationId);
+    expect(opened).not.toBe(a.conversationId);
+    expect(await b.service.getConversation(b.sessionId, opened)).toEqual([]);
+  });
+
+  it("an empty Customer message is rejected without reaching the Agent", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    await expect(service.sendCustomerMessage(sessionId, conversationId, "   ")).rejects.toBeInstanceOf(
+      EmptyCustomerMessageError,
+    );
+    expect(model.requests).toHaveLength(0);
+    expect(await service.getConversation(sessionId, conversationId)).toEqual([]);
   });
 
   it("a reply cut off at max_tokens mid tool call is retried rather than running a truncated call", async () => {
