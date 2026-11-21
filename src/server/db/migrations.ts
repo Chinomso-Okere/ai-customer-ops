@@ -46,6 +46,22 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
         created_at    timestamptz NOT NULL,
         UNIQUE (session_id, job_reference)
       );
+
+      CREATE TABLE visit (
+        id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id         uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        job_id             uuid NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+        engineer_id        uuid NOT NULL REFERENCES engineer(id) ON DELETE CASCADE,
+        visit_date         date NOT NULL,
+        time_window        text NOT NULL CHECK (time_window IN ('AM', 'PM')),
+        is_emergency_visit boolean NOT NULL DEFAULT false
+      );
+      CREATE INDEX visit_session_idx ON visit (session_id, visit_date);
+      -- An Engineer attends one Visit per Time Window; only an Emergency Visit
+      -- may override a full calendar.
+      CREATE UNIQUE INDEX visit_engineer_window_uniq
+        ON visit (session_id, engineer_id, visit_date, time_window)
+        WHERE NOT is_emergency_visit;
     `,
   },
 ];

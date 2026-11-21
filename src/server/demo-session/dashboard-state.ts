@@ -1,3 +1,5 @@
+import type { PlainDate } from "@/domain/london-time";
+import type { TimeWindow } from "@/domain/time-window";
 import type { IssueType, JobStatus } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
 
@@ -13,6 +15,14 @@ export interface DashboardCustomer {
   email: string;
 }
 
+export interface DashboardVisit {
+  id: string;
+  date: PlainDate;
+  timeWindow: TimeWindow;
+  engineer: { id: string; name: string };
+  isEmergencyVisit: boolean;
+}
+
 export interface DashboardJob {
   id: string;
   jobReference: string;
@@ -21,6 +31,8 @@ export interface DashboardJob {
   jobStatus: JobStatus;
   createdAt: string;
   customer: DashboardCustomer;
+  /** All of the Job's Visits, earliest first. */
+  visits: DashboardVisit[];
 }
 
 /** Everything the Operations Dashboard shows for one Demo Session. JSON-safe. */
@@ -62,10 +74,41 @@ export async function readDashboardState(
     [sessionId],
   );
 
+  const visits = await db.query<{
+    id: string;
+    job_id: string;
+    visit_date: PlainDate;
+    time_window: TimeWindow;
+    engineer_id: string;
+    engineer_name: string;
+    is_emergency_visit: boolean;
+  }>(
+    `SELECT v.id, v.job_id, v.visit_date::text AS visit_date, v.time_window,
+            v.engineer_id, e.name AS engineer_name, v.is_emergency_visit
+       FROM visit v
+       JOIN engineer e ON e.id = v.engineer_id AND e.session_id = v.session_id
+      WHERE v.session_id = $1
+      ORDER BY v.visit_date, v.time_window, e.sort_order`,
+    [sessionId],
+  );
+  const visitsByJob = new Map<string, DashboardVisit[]>();
+  for (const v of visits.rows) {
+    const list = visitsByJob.get(v.job_id) ?? [];
+    list.push({
+      id: v.id,
+      date: v.visit_date,
+      timeWindow: v.time_window,
+      engineer: { id: v.engineer_id, name: v.engineer_name },
+      isEmergencyVisit: v.is_emergency_visit,
+    });
+    visitsByJob.set(v.job_id, list);
+  }
+
   return {
     sessionId,
     calendar: { engineers: engineers.rows },
     jobs: jobs.rows.map((r) => ({
+      visits: visitsByJob.get(r.id) ?? [],
       id: r.id,
       jobReference: r.job_reference,
       issueType: r.issue_type,

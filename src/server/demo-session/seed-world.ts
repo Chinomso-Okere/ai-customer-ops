@@ -1,5 +1,5 @@
 import { addWeekdays, isWeekday, londonDateOf, type PlainDate } from "@/domain/london-time";
-import { timeWindowStart } from "@/domain/time-window";
+import { timeWindowStart, type TimeWindow } from "@/domain/time-window";
 import type { Database } from "@/server/db/database";
 import { CUSTOMERS, ENGINEERS, JOBS, type JobSeed } from "./seed-data";
 
@@ -12,11 +12,13 @@ const FIRST_JOB_REFERENCE = 10401;
 export async function seedWorld(tx: Database, sessionId: string, now: Date): Promise<void> {
   const today = londonDateOf(now);
 
+  const engineerIds: string[] = [];
   for (const [i, e] of ENGINEERS.entries()) {
-    await tx.query(
-      "INSERT INTO engineer (session_id, name, skills, sort_order) VALUES ($1, $2, $3, $4)",
+    const { rows } = await tx.query<{ id: string }>(
+      "INSERT INTO engineer (session_id, name, skills, sort_order) VALUES ($1, $2, $3, $4) RETURNING id",
       [sessionId, e.name, e.skills, i],
     );
+    engineerIds.push(rows[0]!.id);
   }
 
   const customerIds: string[] = [];
@@ -29,13 +31,15 @@ export async function seedWorld(tx: Database, sessionId: string, now: Date): Pro
     customerIds.push(rows[0]!.id);
   }
 
+  const visitPlan = planVisits(today);
+
   // Job References count up in the order Jobs were raised.
-  const raised = JOBS.map((job, i) => ({ job, createdAt: jobRaisedAt(job, i, today, now) }));
+  const raised = JOBS.map((job, i) => ({ job, i, createdAt: jobRaisedAt(job, i, today, now) }));
   const byAge = [...raised].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  for (const [rank, { job, createdAt }] of byAge.entries()) {
-    await tx.query(
+  for (const [rank, { job, i, createdAt }] of byAge.entries()) {
+    const { rows } = await tx.query<{ id: string }>(
       `INSERT INTO job (session_id, job_reference, customer_id, issue_type, description, job_status, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [
         sessionId,
         `APX-${FIRST_JOB_REFERENCE + rank * 3 + (rank % 2)}`,
@@ -46,13 +50,61 @@ export async function seedWorld(tx: Database, sessionId: string, now: Date): Pro
         createdAt,
       ],
     );
+    for (const v of visitPlan[i]!) {
+      await tx.query(
+        `INSERT INTO visit (session_id, job_id, engineer_id, visit_date, time_window)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [sessionId, rows[0]!.id, engineerIds[v.engineer], v.date, v.timeWindow],
+      );
+    }
   }
 }
 
-/** The London date of a seed weekday offset; offset 0 at a weekend means the previous Friday. */
-export function seedVisitDate(today: PlainDate, weekdayOffset: number): PlainDate {
-  if (weekdayOffset === 0) return isWeekday(today) ? today : addWeekdays(today, -1);
-  return addWeekdays(today, weekdayOffset);
+interface PlannedVisit {
+  engineer: number;
+  date: PlainDate;
+  timeWindow: TimeWindow;
+}
+
+/**
+ * Assigns every seeded Visit an Engineer skilled for its Job's Issue Type,
+ * never double-booking. A multi-Visit Job keeps one Engineer where possible.
+ * Deterministic for a given `today`.
+ */
+function planVisits(today: PlainDate): PlannedVisit[][] {
+  const booked = new Set<string>();
+  const cell = (engineer: number, date: PlainDate, w: TimeWindow) => `${engineer}|${date}|${w}`;
+
+  return JOBS.map((job, jobIndex) => {
+    const visits = job.visits.map(([offset, timeWindow]) => ({
+      date: seedVisitDate(today, offset),
+      timeWindow,
+    }));
+    const skilled = ENGINEERS.flatMap((e, i) => (e.skills.includes(job.issueType) ? [i] : []));
+    // Rotate the starting Engineer so work spreads across the team.
+    const candidates = skilled.map((_, k) => skilled[(k + jobIndex) % skilled.length]!);
+    const isFree = (engineer: number, v: { date: PlainDate; timeWindow: TimeWindow }) =>
+      !booked.has(cell(engineer, v.date, v.timeWindow));
+
+    const oneEngineer = candidates.find((e) => visits.every((v) => isFree(e, v)));
+    return visits.map((v) => {
+      const engineer = oneEngineer ?? candidates.find((e) => isFree(e, v));
+      if (engineer === undefined) {
+        throw new Error(`Seed world: no free ${job.issueType} Engineer on ${v.date} ${v.timeWindow}`);
+      }
+      booked.add(cell(engineer, v.date, v.timeWindow));
+      return { engineer, ...v };
+    });
+  });
+}
+
+/**
+ * The London date of a seed weekday offset. At a weekend, "today" (offset 0)
+ * is the previous Friday and earlier offsets count back from there.
+ */
+function seedVisitDate(today: PlainDate, weekdayOffset: number): PlainDate {
+  if (weekdayOffset > 0 || isWeekday(today)) return addWeekdays(today, weekdayOffset);
+  return addWeekdays(today, weekdayOffset - 1);
 }
 
 /** When the Customer first got in touch: a few days before the first Visit, never after "now". */

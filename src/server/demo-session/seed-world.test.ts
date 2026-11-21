@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isInCoverageArea, outwardCode } from "@/domain/coverage-area";
+import { addDays, isWeekday, londonDateOf } from "@/domain/london-time";
+import { TIME_WINDOWS } from "@/domain/time-window";
 import { JOB_STATUSES } from "@/domain/vocabulary";
 import { createHarness, london } from "@/server/testing/harness";
 
@@ -39,5 +41,48 @@ describe("seed world", () => {
     const outwardCodes = new Set(state.jobs.map((j) => outwardCode(j.customer.postcode)));
     expect(outwardCodes.size).toBeGreaterThanOrEqual(8);
     for (const job of state.jobs) expect(isInCoverageArea(job.customer.postcode)).toBe(true);
+  });
+
+  describe.each([
+    ["Wednesday morning", london("2026-11-18T09:15")],
+    ["Friday afternoon", london("2026-11-20T16:30")],
+    ["Saturday", london("2026-11-21T10:00")],
+    ["Sunday night", london("2026-11-22T23:30")],
+    ["Monday before opening", london("2026-11-23T07:00")],
+    ["summer (BST)", london("2026-07-15T11:30")],
+    ["the Monday after clocks go forward", london("2026-03-30T08:30")],
+  ])("seeded on %s", (_label, now) => {
+    it("every Visit is on a weekday in a valid Time Window, with an Engineer skilled for the Job's Issue Type", async () => {
+      const state = await seededState(now);
+      const skills = new Map(state.calendar.engineers.map((e) => [e.id, e.skills]));
+
+      const visits = state.jobs.flatMap((job) => job.visits.map((visit) => ({ job, visit })));
+      expect(visits.length).toBeGreaterThan(0);
+      for (const { job, visit } of visits) {
+        expect(isWeekday(visit.date)).toBe(true);
+        expect(TIME_WINDOWS).toContain(visit.timeWindow);
+        expect(skills.get(visit.engineer.id)).toContain(job.issueType);
+      }
+    });
+
+    it("no Engineer is double-booked", async () => {
+      const state = await seededState(now);
+
+      const cells = state.jobs.flatMap((job) =>
+        job.visits.map((v) => `${v.engineer.id}|${v.date}|${v.timeWindow}`),
+      );
+      expect(new Set(cells).size).toBe(cells.length);
+    });
+
+    it("Visits span from about a month ago to two weeks ahead of the session's creation", async () => {
+      const state = await seededState(now);
+      const today = londonDateOf(now);
+
+      const dates = state.jobs.flatMap((job) => job.visits.map((v) => v.date)).sort();
+      expect(dates[0]! >= addDays(today, -30)).toBe(true);
+      expect(dates[0]! <= addDays(today, -21)).toBe(true);
+      expect(dates.at(-1)! <= addDays(today, 14)).toBe(true);
+      expect(dates.at(-1)! >= addDays(today, 10)).toBe(true);
+    });
   });
 });
