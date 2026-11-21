@@ -63,6 +63,33 @@ advice, the block is the guarantee.
 - One PGlite database is shared per test file: assert per Demo Session, never
   on global counts.
 
+## Check the chat UI without the paid key
+
+`AGENT_MODEL=scripted npm run dev` (leave `ANTHROPIC_API_KEY` unset) runs the app
+with `DevScriptedModelClient` (`src/server/testing/dev-scripted-model.ts`), a
+keyword router over the conversation, not a model. Use it, never the real key,
+to check a chat flow in a browser. Drive it by clicking the scenario tray, or
+over HTTP: `POST /api/demo-session`, `POST /api/conversation`, then
+`POST /api/conversation/messages` with `{ "text": ... }`, keeping the cookies
+(`apex_demo_session`, `apex_conversation`).
+
+- **Covers:** Price List answers, `get_availability`, `propose_booking` then
+  `confirm_action`, `verify_customer` then `get_job_details`, and
+  `create_handoff_ticket` for complaints and refunds. Gas/CO is the pre-model
+  hook, so it needs no model.
+- **Routing is stateless:** it reads the customer's words and the tool results
+  already in the request, so it keeps no state of its own. Add a behaviour in
+  `startTurn` (what to call) and `afterTool` (what to say) in that file, and a
+  test in `src/server/demo-session/dev-scripted-model.test.ts`, which drives the
+  real Agent through the Demo Session service.
+- **Restart the dev server after editing it:** the model client is cached on
+  `globalThis` across hot reloads.
+- **Dev only, enforced twice:** `src/server/runtime.ts` imports it behind
+  `process.env.NODE_ENV !== "production"`, which the production build inlines,
+  so the file is not in the bundle; and with `NODE_ENV=production` the setting
+  throws instead of being ignored (`src/server/runtime.test.ts`). Keep any new
+  import of it behind the same check.
+
 ## Gotchas
 
 - **Serialise session writes with `lockDemoSession(tx, sessionId)`**

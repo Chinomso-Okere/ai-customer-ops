@@ -12,6 +12,7 @@ Operations Dashboard (right). Every visitor gets a private, freshly seeded
 | Test (Vitest, in-process Postgres via PGlite) | `npm test` |
 | Typecheck | `npm run typecheck` |
 | Dev server (http://localhost:3000) | `npm run dev` |
+| Dev server, no API key (scripted Agent) | `AGENT_MODEL=scripted npm run dev` |
 | Production build | `npm run build` |
 | Eval suite (real model, costs money) | `npm run eval` |
 
@@ -89,6 +90,17 @@ tool loop on Claude Sonnet 5.5 (`src/server/agent/runner.ts`).
   See `src/server/model-client.ts`.
 
 Set `ANTHROPIC_API_KEY` to chat; without it, the Agent replies with an apology.
+
+**Scripted dev mode (no paid key).** `AGENT_MODEL=scripted npm run dev` swaps
+the model for a small keyword router (`src/server/testing/dev-scripted-model.ts`)
+so you, or an agent driving a browser, can click through the scenario tray:
+Price List questions, Availability, a proposed and confirmed Booking,
+verifying a demo-friendly Customer and looking up their Job, and a refund
+request (Handoff Ticket). The gas scenario is caught by the Emergency
+pre-filter before any model. It is not a model: wording is canned and
+anything off-script gets a help message. It is dev only: a production build
+does not contain it and refuses to serve while `AGENT_MODEL=scripted` is set.
+Never use the real key to check the UI; use this. See `docs/agents/extending.md`.
 
 ## Guardrails
 
