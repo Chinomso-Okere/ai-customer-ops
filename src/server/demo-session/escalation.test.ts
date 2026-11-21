@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { london } from "@/server/testing/harness";
+import { reply, text } from "@/server/testing/scripted-model-client";
 import { chatHarness, toolTurn, type ChatHarness } from "@/server/testing/tool-turns";
 
 const WEDNESDAY = london("2026-11-18T11:30");
@@ -73,5 +74,59 @@ describe("Complaint and Out of Policy escalations (create_handoff_ticket)", () =
     const raised = await toolTurn(h, "I'm furious", "create_handoff_ticket", { ...complaint, urgency: "Critical" });
     expect(raised.ok).toBe(true);
     expect((await ticketsOf(h)).map((t) => t.urgency)).toEqual(["Critical"]);
+  });
+
+  it("a repeat on the same reason appends to the open ticket; a different reason gets its own ticket", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    const first = await toolTurn(h, "Your engineer was rude", "create_handoff_ticket", complaint);
+    const repeat = await toolTurn(h, "And he left mud everywhere", "create_handoff_ticket", complaint);
+
+    expect(repeat.ok && repeat.result).toMatchObject({
+      ticketReference: first.ok && first.result.ticketReference,
+      ticketAction: "appended",
+    });
+    const [ticket] = await ticketsOf(h);
+    expect(ticket!.timeline.map((e) => e.kind)).toEqual(["created", "appended"]);
+    expect(ticket!.timeline[1]!.text).toContain("mud everywhere");
+
+    await toolTurn(h, "I want a refund", "create_handoff_ticket", {
+      reason: "Out of Policy",
+      summary: "Customer wants a refund for the call-out.",
+      recommendedNextStep: "Review the refund request.",
+    });
+    expect((await ticketsOf(h)).map((t) => t.escalationReason).sort()).toEqual(["Complaint", "Out of Policy"]);
+  });
+
+  it("a refund after a gas Emergency creates its own ticket beside the Emergency one", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "I smell gas");
+
+    await toolTurn(h, "Will you refund my last Visit?", "create_handoff_ticket", {
+      reason: "Out of Policy",
+      summary: "Customer wants a refund.",
+      recommendedNextStep: "Review the refund request.",
+    });
+
+    const tickets = await ticketsOf(h);
+    expect(tickets.map((t) => [t.escalationReason, t.urgency])).toEqual([
+      ["Emergency", "Critical"],
+      ["Out of Policy", "Normal"],
+    ]);
+  });
+
+  it("after escalating, the model is told the ticket is open and not to act on that topic", async () => {
+    const h = await chatHarness(WEDNESDAY);
+    const outcome = await toolTurn(h, "I want compensation", "create_handoff_ticket", {
+      reason: "Out of Policy",
+      summary: "Customer wants compensation.",
+      recommendedNextStep: "Review.",
+    });
+    const reference = outcome.ok && outcome.result.ticketReference;
+
+    h.model.script(reply([text("A boiler service is £89.")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "OK. Separately, how much is a boiler service?");
+    const notes = JSON.stringify(h.model.requests.at(-1)!.messages.filter((m) => (m.role as string) === "system"));
+    expect(notes).toContain(reference);
+    expect(notes).toMatch(/do not/i);
   });
 });

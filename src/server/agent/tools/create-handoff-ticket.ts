@@ -67,6 +67,12 @@ export const createHandoffTicket: AgentTool = {
       now: ctx.now,
     });
 
+    if (ticket.isNew) {
+      await ctx.enqueueSystemNote(
+        `${reason} Handoff Ticket ${ticket.ticketReference} (${ticket.urgency}) is open for this conversation: an Apex team member will follow up. Do not act on or promise anything about the escalated topic yourself; quote ${ticket.ticketReference} if it comes up. Other topics can be handled as usual.`,
+      );
+    }
+
     return {
       ok: true,
       result: {
