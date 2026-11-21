@@ -5,3 +5,19 @@ export class DemoSessionNotFoundError extends Error {
     this.name = "DemoSessionNotFoundError";
   }
 }
+
+/** The conversation does not exist in this Demo Session; the widget should open a new one. */
+export class ConversationNotFoundError extends Error {
+  constructor(conversationId: string) {
+    super(`Conversation not found in this Demo Session: ${conversationId}`);
+    this.name = "ConversationNotFoundError";
+  }
+}
+
+/** The Customer message was empty (or only whitespace). */
+export class EmptyCustomerMessageError extends Error {
+  constructor() {
+    super("Customer message is empty");
+    this.name = "EmptyCustomerMessageError";
+  }
+}

@@ -3,7 +3,8 @@ import { fixedClock } from "@/server/clock";
 import type { Database } from "@/server/db/database";
 import { createPGliteDatabase } from "@/server/db/pglite";
 import { createDemoSessionService } from "@/server/demo-session";
-import { placeholderModelClient, type ModelClient } from "@/server/model-client";
+import type { ModelClient } from "@/server/model-client";
+import { ScriptedModelClient } from "./scripted-model-client";
 
 // Booting PGlite takes seconds, so one migrated database is shared per test
 // worker. Every test works in its own Demo Sessions, which are isolated by
@@ -12,7 +13,8 @@ let sharedDb: Promise<Database> | undefined;
 
 /**
  * Seam 1 harness: the real Demo Session service over a real in-process
- * Postgres (PGlite), with a pinned clock. No repository mocks.
+ * Postgres (PGlite), with a pinned clock. No repository mocks. The model is a
+ * `ScriptedModelClient` (pass your own to script the Agent's turns).
  */
 export async function createHarness(options: { now: Date; modelClient?: ModelClient }) {
   const clock = fixedClock(options.now);
@@ -21,7 +23,7 @@ export async function createHarness(options: { now: Date; modelClient?: ModelCli
   const service = createDemoSessionService({
     db,
     clock,
-    modelClient: options.modelClient ?? placeholderModelClient,
+    modelClient: options.modelClient ?? new ScriptedModelClient(),
   });
   return { service, clock };
 }

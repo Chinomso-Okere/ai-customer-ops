@@ -2,7 +2,7 @@ import "server-only";
 import { systemClock } from "./clock";
 import type { Database } from "./db/database";
 import { createDemoSessionService, type DemoSessionService } from "./demo-session";
-import { placeholderModelClient } from "./model-client";
+import { AnthropicModelClient, unconfiguredModelClient, type ModelClient } from "./model-client";
 
 /**
  * Wires the Demo Session service for the running app: Postgres from
@@ -23,9 +23,14 @@ async function createDatabase(): Promise<Database> {
   return createPGliteDatabase();
 }
 
+/** The real model when ANTHROPIC_API_KEY is set; otherwise the Agent apologises on every turn. */
+function createModelClient(): ModelClient {
+  return process.env.ANTHROPIC_API_KEY ? new AnthropicModelClient() : unconfiguredModelClient;
+}
+
 export function getDemoSessionService(): Promise<DemoSessionService> {
   globalForRuntime.apexDemoSessionService ??= createDatabase().then(
-    (db) => createDemoSessionService({ db, clock: systemClock, modelClient: placeholderModelClient }),
+    (db) => createDemoSessionService({ db, clock: systemClock, modelClient: createModelClient() }),
     (error: unknown) => {
       globalForRuntime.apexDemoSessionService = undefined; // retry on the next request
       throw error;
