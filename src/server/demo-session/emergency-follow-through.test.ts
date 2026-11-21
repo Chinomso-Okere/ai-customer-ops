@@ -235,18 +235,13 @@ describe("Emergency Visit: Engineer choice ignores cancelled Visits", () => {
   it("a cancelled Visit doesn't make an Engineer busier in the Emergency Visit's window", async () => {
     const h = await chatHarness(TUESDAY_1900);
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "water is pouring out of the boiler!");
-    // Who gets the Emergency Visit when nobody is carrying cancelled Visits: least busy, then roster order.
-    const { rows } = await h.db.query<{ id: string }>(
-      `SELECT e.id FROM engineer e
-        WHERE e.session_id = $1 AND 'Boiler Repair' = ANY(e.skills)
-        ORDER BY (SELECT count(*) FROM visit v
-                   WHERE v.session_id = $1 AND v.engineer_id = e.id AND v.cancelled_at IS NULL
-                     AND v.visit_date = $2 AND v.time_window = 'AM'),
-                 e.sort_order`,
-      [h.sessionId, WEDNESDAY],
-    );
-    const expected = rows[0]!.id;
-    const { jobs } = await h.service.getDashboardState(h.sessionId);
+    // Seed, Wednesday AM: of the Boiler Repair Engineers (Dave Okafor, Marta Kowalski,
+    // Leon Grant), Marta has a Visit; Dave and Leon are free, and Dave is first on
+    // the roster. So the least-busy rule picks Dave, unless his cancelled Visits count.
+    const { jobs, calendar: seeded } = await h.service.getDashboardState(h.sessionId);
+    const expected = seeded.engineers.find((e) => e.name === "Dave Okafor")!.id;
+    // Raw insert: the service can't create cancelled Visits pinned to one Engineer
+    // in one window (booking picks the Engineer itself).
     await h.db.query(
       `INSERT INTO visit (session_id, job_id, engineer_id, visit_date, time_window, cancelled_at)
        SELECT $1, $2, $3, $4, 'AM', $5 FROM generate_series(1, 3)`,
