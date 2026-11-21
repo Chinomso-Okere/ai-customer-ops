@@ -28,6 +28,8 @@ export interface PendingActionKind<Payload = never> {
   execute(tx: Database, ctx: AgentTurnContext, payload: Payload): Promise<ToolOutcome>;
 }
 
+// `any` is deliberate: a registry holds kinds with different payload types.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyPendingActionKind = PendingActionKind<any>;
 
 /**

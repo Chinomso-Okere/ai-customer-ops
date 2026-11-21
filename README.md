@@ -10,6 +10,7 @@ Operations Dashboard (right). Every visitor gets a private, freshly seeded
 | --- | --- |
 | Install | `npm install` |
 | Test (Vitest, in-process Postgres via PGlite) | `npm test` |
+| Lint (ESLint, Next.js config) | `npm run lint` |
 | Typecheck | `npm run typecheck` |
 | Dev server (http://localhost:3000) | `npm run dev` |
 | Dev server, no API key (scripted Agent) | `AGENT_MODEL=scripted npm run dev` |
