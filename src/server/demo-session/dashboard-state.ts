@@ -83,6 +83,13 @@ export interface DashboardState {
   partsOrders: DashboardPartsOrder[];
   /** The queue: most urgent first, then oldest first. */
   handoffTickets: DashboardHandoffTicket[];
+  /** Customers whose details the "Try a scenario" tray shows visitors. */
+  demoCustomers: DemoCustomer[];
+}
+
+export interface DemoCustomer extends DashboardCustomer {
+  phone: string | null;
+  jobReferences: string[];
 }
 
 export interface DashboardHandoffTicket {
@@ -236,8 +243,20 @@ export async function readDashboardState(
     [sessionId, URGENCIES],
   );
 
+  const demoCustomers = await db.query<DemoCustomer>(
+    `SELECT c.full_name AS "fullName", c.postcode, c.email, c.phone,
+            array_agg(j.job_reference ORDER BY j.job_reference) AS "jobReferences"
+       FROM customer c
+       JOIN job j ON j.customer_id = c.id AND j.session_id = c.session_id
+      WHERE c.session_id = $1 AND c.demo_friendly
+      GROUP BY c.id
+      ORDER BY c.full_name`,
+    [sessionId],
+  );
+
   return {
     sessionId,
+    demoCustomers: demoCustomers.rows,
     calendar: { days, engineers: engineers.rows, visits: calendarVisits },
     jobs: dashboardJobs,
     partsOrders: partsOrders.rows,

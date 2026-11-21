@@ -73,6 +73,28 @@ describe("seed world", () => {
     }
   });
 
+  it("designates 3 demo-friendly Customers, each with Verification details and a Job to look up", async () => {
+    const state = await seededState(WEDNESDAY);
+
+    expect(state.demoCustomers).toHaveLength(3);
+    const jobsByReference = new Map(state.jobs.map((j) => [j.jobReference, j]));
+    for (const demo of state.demoCustomers) {
+      expect(demo.jobReferences.length).toBeGreaterThan(0);
+      for (const ref of demo.jobReferences) {
+        expect(jobsByReference.get(ref)?.customer).toEqual({
+          fullName: demo.fullName,
+          postcode: demo.postcode,
+          email: demo.email,
+        });
+      }
+    }
+    // Between them they cover "Where's my part?": a Dispatched Parts Order.
+    const demoJobs = new Set(state.demoCustomers.flatMap((d) => d.jobReferences));
+    expect(
+      state.partsOrders.some((p) => demoJobs.has(p.jobReference) && p.partsStatus === "Dispatched"),
+    ).toBe(true);
+  });
+
   describe.each([
     ["Wednesday morning", london("2026-11-18T09:15")],
     ["Friday afternoon", london("2026-11-20T16:30")],
