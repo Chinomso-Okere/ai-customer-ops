@@ -2,8 +2,9 @@ import { addWeekdays, isWeekday, londonDateOf } from "@/domain/london-time";
 import { TIME_WINDOWS, timeWindowEnd } from "@/domain/time-window";
 import type { IssueType } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
+import { lockDemoSession } from "@/server/db/session-lock";
 import type { CandidateWindow } from "./availability";
-import { createCustomerJob, lockSessionSchedule, type BookedJob, type NewCustomer } from "./booking";
+import { createCustomerJob, type BookedJob, type NewCustomer } from "./booking";
 
 /** An Engineer must have at least this long left in a Time Window to attend an Emergency Visit in it. */
 export const EMERGENCY_VISIT_MIN_REMAINING_MS = 2 * 60 * 60 * 1000;
@@ -35,7 +36,7 @@ export async function bookEmergencyVisit(
   sessionId: string,
   booking: { customer: NewCustomer; issueType: IssueType; description: string; window: CandidateWindow; now: Date },
 ): Promise<BookedJob | undefined> {
-  await lockSessionSchedule(tx, sessionId);
+  await lockDemoSession(tx, sessionId);
   // Skilled Engineers, least busy in the window first, then roster order.
   const skilled = await tx.query<{ id: string; name: string }>(
     `SELECT e.id, e.name FROM engineer e

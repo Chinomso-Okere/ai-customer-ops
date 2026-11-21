@@ -1,6 +1,7 @@
 import type { EmergencyKind } from "@/domain/emergency-prefilter";
 import { URGENCIES, type EscalationReason, type HandoffTicketStatus, type Urgency } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
+import { lockDemoSession } from "@/server/db/session-lock";
 import { handoffTicketReference, type HandoffTicketEvent } from "@/server/demo-session/dashboard-state";
 import { HandoffTicketNotFoundError, HandoffTicketStateError } from "@/server/demo-session/errors";
 
@@ -51,7 +52,7 @@ export async function raiseHandoffTicket(
   const { sessionId, conversationId, reason, now } = input;
   return db.transaction(async (tx) => {
     // Serialises ticket numbering (and the open-ticket check) within the Demo Session.
-    await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [sessionId]);
+    await lockDemoSession(tx, sessionId);
 
     const open = await tx.query<{ id: string; ticket_number: number; urgency: Urgency }>(
       `SELECT id, ticket_number, urgency FROM handoff_ticket

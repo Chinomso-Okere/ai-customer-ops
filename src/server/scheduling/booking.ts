@@ -1,15 +1,8 @@
 import type { IssueType } from "@/domain/vocabulary";
 import { matchCustomer } from "./customer-matching";
 import type { Database } from "@/server/db/database";
+import { lockDemoSession } from "@/server/db/session-lock";
 import { checkWindowAvailable, type CandidateWindow } from "./availability";
-
-/**
- * Serialises scheduling writes within one Demo Session, so two conversations
- * can't both take the last free Engineer. Call inside a transaction.
- */
-export async function lockSessionSchedule(tx: Database, sessionId: string): Promise<void> {
-  await tx.query("SELECT 1 FROM demo_session WHERE id = $1 FOR UPDATE", [sessionId]);
-}
 
 export interface CreatedVisit {
   visitId: string;
@@ -27,7 +20,8 @@ export async function createVisit(
   sessionId: string,
   visit: { jobId: string; issueType: IssueType; window: CandidateWindow; now: Date },
 ): Promise<CreatedVisit | undefined> {
-  await lockSessionSchedule(tx, sessionId);
+  // Two conversations can't both take the last free Engineer.
+  await lockDemoSession(tx, sessionId);
   const available = await checkWindowAvailable(tx, sessionId, visit.issueType, visit.window, visit.now);
   const engineerId = available?.freeEngineerIds[0];
   if (!engineerId) return undefined;
@@ -81,7 +75,8 @@ export async function bookJob(
     now: Date;
   },
 ): Promise<BookedJob | undefined> {
-  await lockSessionSchedule(tx, sessionId);
+  // Two conversations can't both take the last free Engineer.
+  await lockDemoSession(tx, sessionId);
   const available = await checkWindowAvailable(tx, sessionId, booking.issueType, booking.window, booking.now);
   if (!available) return undefined;
 
