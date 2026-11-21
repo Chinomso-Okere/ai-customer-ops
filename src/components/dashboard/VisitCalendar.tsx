@@ -54,8 +54,9 @@ export function VisitCalendar({ calendar }: { calendar: DashboardState["calendar
                             <span
                               key={v.visitId}
                               className={`visit visit--${slug(v.issueType)}${v.isEmergencyVisit ? " visit--emergency" : ""}`}
-                              title={`${v.jobReference} · ${v.issueType} · ${v.customerName}, ${v.postcode} · ${v.jobStatus}`}
+                              title={`${v.isEmergencyVisit ? "Emergency Visit · " : ""}${v.jobReference} · ${v.issueType} · ${v.customerName}, ${v.postcode} · ${v.jobStatus}`}
                             >
+                              {v.isEmergencyVisit ? "! " : ""}
                               {v.jobReference.replace("APX-", "")}
                             </span>
                           ))}
