@@ -1,6 +1,6 @@
 import { normalisePostcode } from "@/domain/coverage-area";
 import type { Database } from "@/server/db/database";
-import { normaliseEmail, normaliseName } from "@/server/verification";
+import { normaliseEmail, normaliseName, sqlEmailEquals } from "@/server/verification";
 
 export interface CustomerDetails {
   fullName: string;
@@ -29,7 +29,7 @@ export async function matchCustomer(
   const { rows } = await db.query<{ id: string; full_name: string; postcode: string; email: string }>(
     `SELECT id, full_name, postcode, email
        FROM customer
-      WHERE session_id = $1 AND lower(regexp_replace(email, '\\s', '', 'g')) = $2
+      WHERE session_id = $1 AND ${sqlEmailEquals("email", "$2")}
       ORDER BY created_at, id`,
     [sessionId, normaliseEmail(details.email)],
   );
