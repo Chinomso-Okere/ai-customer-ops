@@ -3,6 +3,7 @@ import { AgentTracePanel } from "./AgentTracePanel";
 import { HandoffTicketQueue } from "./HandoffTicketQueue";
 import { JobsList } from "./JobsList";
 import { PartsOrdersList } from "./PartsOrdersList";
+import { PossibleDuplicatesPanel } from "./PossibleDuplicatesPanel";
 import { VisitCalendar } from "./VisitCalendar";
 
 /**
@@ -14,6 +15,7 @@ export function OperationsDashboard({ state, onChanged }: { state: DashboardStat
     <div className="ops">
       <h2 className="ops__title">Operations Dashboard</h2>
       <HandoffTicketQueue tickets={state.handoffTickets} onChanged={onChanged} />
+      <PossibleDuplicatesPanel duplicates={state.possibleDuplicateCustomers} />
       <AgentTracePanel entries={state.agentTrace} />
       <VisitCalendar calendar={state.calendar} />
       <div className="ops__lists">
