@@ -1,4 +1,5 @@
 import type { Database } from "@/server/db/database";
+import { gasEmergencyBookingBlock } from "../emergency";
 import type { AgentTurnContext, ToolOutcome } from "../types";
 
 /**
@@ -14,6 +15,11 @@ import type { AgentTurnContext, ToolOutcome } from "../types";
 export interface PendingActionKind<Payload = never> {
   /** Stored on the pending action, e.g. "booking". */
   kind: string;
+  /**
+   * Set for writes that book nothing (e.g. a cancellation): they may still be
+   * confirmed during an unresolved gas/CO Emergency. Everything else is refused.
+   */
+  allowedDuringGasEmergency?: boolean;
   /**
    * Performs the write, inside a transaction, when the Customer has confirmed.
    * Time has passed since the proposal: re-check anything that may have changed
@@ -110,6 +116,11 @@ export async function confirmAction(
       }
       const kind = kinds.find((k) => k.kind === action.kind);
       if (!kind) throw new Error(`Unknown pending action kind "${action.kind}"`);
+      if (!kind.allowedDuringGasEmergency) {
+        // A proposal made before the gas/CO Emergency can't be confirmed during it.
+        const blocked = await gasEmergencyBookingBlock({ ...ctx, db: tx });
+        if (blocked) return blocked;
+      }
 
       const outcome = await kind.execute(tx, ctx, action.payload);
       if (!outcome.ok) throw new RolledBack(outcome);

@@ -1,5 +1,6 @@
 import { detectEmergency, type EmergencyKind } from "@/domain/emergency-prefilter";
 import { getVerification } from "@/server/verification";
+import { openEmergency } from "../emergency";
 import { raiseHandoffTicket } from "../handoff-tickets";
 import { SAFETY_SCRIPTS, safetyScriptText } from "../safety-scripts";
 import type { PreModelHook } from "../types";
@@ -18,6 +19,14 @@ const NEXT_STEPS: Record<EmergencyKind, string> = {
 
 const QUOTE_LIMIT = 300;
 
+/** The mid-conversation system message telling the model what the open Emergency means for it. */
+const EMERGENCY_NOTES: Record<EmergencyKind, (ticketReference: string) => string> = {
+  gas_or_co: (ref) =>
+    `Emergency (${LABELS.gas_or_co}): the Safety Script was shown and Critical Handoff Ticket ${ref} is open for this conversation. Apex doesn't fix gas leaks. Do not book, reschedule or offer any Visit in this conversation until an Operator resolves ${ref}: the booking tools will refuse. Keep pointing the Customer to the safety advice: leave the property and call National Gas Emergency on 0800 111 999. If the Customer mentions it, quote ${ref}. You may still answer other questions.`,
+  flood_or_sparks: (ref) =>
+    `Emergency (${LABELS.flood_or_sparks}): the Safety Script was shown and Critical Handoff Ticket ${ref} is open for this conversation. Offer the Customer the earliest Emergency Visit: collect their full name, postcode, email and Issue Type (phone optional), call propose_emergency_visit, read back its window and call confirm_action once they agree. An Emergency Visit may be booked even when normal Availability is full. If the Customer mentions it, quote ${ref}.`,
+};
+
 /**
  * The Emergency pre-filter (ADR-0002), on every Customer message before the
  * model: on a match, show the fixed Safety Script and raise (or append to) the
@@ -32,6 +41,7 @@ export const emergencyPrefilter: PreModelHook = async (ctx) => {
   const quoted = ctx.customerMessage.text.slice(0, QUOTE_LIMIT);
   // The Customer details known so far: whoever this conversation is verified as.
   const { verifiedCustomerId } = await getVerification(ctx.db, ctx);
+  const before = await openEmergency(ctx);
   const ticket = await raiseHandoffTicket(ctx.db, {
     customerId: verifiedCustomerId,
     sessionId: ctx.sessionId,
@@ -41,6 +51,7 @@ export const emergencyPrefilter: PreModelHook = async (ctx) => {
     summary: `${LABELS[kind]} reported in chat. Customer said: "${quoted}"`,
     recommendedNextStep: NEXT_STEPS[kind],
     timelineEntry: `Customer: ${quoted}`,
+    emergencyKind: kind,
     now: ctx.now,
   });
 
@@ -54,10 +65,11 @@ export const emergencyPrefilter: PreModelHook = async (ctx) => {
       ticketAction: ticket.isNew ? "created" : "appended",
     }),
   });
-  if (ticket.isNew) {
-    await ctx.enqueueSystemNote(
-      `Emergency (${LABELS[kind]}): the Safety Script was shown and Critical Handoff Ticket ${ticket.ticketReference} is open for this conversation. If the Customer mentions it, quote ${ticket.ticketReference}.`,
-    );
+  // Tell the model (mid-conversation, never by editing the system prompt) when
+  // the ticket opens, or when a flood/sparks Emergency turns out to be gas/CO.
+  const kindNow = before?.emergencyKind === "gas_or_co" ? "gas_or_co" : kind;
+  if (ticket.isNew || before?.emergencyKind !== kindNow) {
+    await ctx.enqueueSystemNote(EMERGENCY_NOTES[kindNow](ticket.ticketReference));
   }
 
   const notice = ticket.isNew

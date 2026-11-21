@@ -1,3 +1,4 @@
+import { blockedDuringGasEmergency } from "../emergency";
 import type { AgentTool } from "../types";
 import { checkCoverageArea } from "./check-coverage-area";
 import { confirmActionTool } from "./confirm-action";
@@ -17,11 +18,12 @@ import { verifyCustomer } from "./verify-customer";
 export const AGENT_TOOLS: readonly AgentTool[] = [
   checkCoverageArea,
   refuseOffTopic,
-  getAvailability,
-  proposeBooking,
+  // Booking tools refuse during an unresolved gas/CO Emergency (#13).
+  blockedDuringGasEmergency(getAvailability),
+  blockedDuringGasEmergency(proposeBooking),
   confirmActionTool,
   verifyCustomer,
   getJobDetails,
   createHandoffTicket,
-  proposeFittingVisit,
+  blockedDuringGasEmergency(proposeFittingVisit),
 ];
