@@ -5,6 +5,7 @@ const KIND_LABELS: Record<string, string> = {
   tool_call: "Tool call",
   refusal: "Model refusal",
   error: "Error",
+  emergency_prefilter: "Emergency pre-filter",
 };
 
 function pretty(value: unknown): string {

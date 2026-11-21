@@ -1,4 +1,5 @@
 import type { PreModelHook } from "../types";
+import { emergencyPrefilter } from "./emergency-prefilter";
 import { messageCapHook } from "./message-cap";
 
 /**
@@ -8,6 +9,8 @@ import { messageCapHook } from "./message-cap";
  * Emergency pre-filter (#4, ADR-0002) and the message cap (#7).
  */
 export const PRE_MODEL_HOOKS: readonly PreModelHook[] = [
+  // First, so the Safety Script is shown even once the session's message cap is reached.
+  emergencyPrefilter,
   // Keep last: Emergency handling must still run past the cap.
   messageCapHook,
 ];

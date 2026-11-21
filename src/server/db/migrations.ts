@@ -204,6 +204,29 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
         ON pending_action (session_id, conversation_id) WHERE status = 'Pending';
     `,
   },
+  {
+    id: "0006_t4_handoff_ticket_timeline",
+    sql: `
+      -- Handoff Tickets raised in chat belong to a conversation; seed tickets have none.
+      ALTER TABLE handoff_ticket
+        ADD COLUMN conversation_id uuid REFERENCES conversation(id) ON DELETE CASCADE;
+      -- At most one open (not Resolved) ticket per Escalation Reason per conversation.
+      CREATE UNIQUE INDEX handoff_ticket_open_reason_uniq
+        ON handoff_ticket (session_id, conversation_id, escalation_reason)
+        WHERE status <> 'Resolved' AND conversation_id IS NOT NULL;
+
+      -- A ticket's timeline: what was added to it, oldest first.
+      CREATE TABLE handoff_ticket_event (
+        seq        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        session_id uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        ticket_id  uuid NOT NULL REFERENCES handoff_ticket(id) ON DELETE CASCADE,
+        kind       text NOT NULL,
+        text       text NOT NULL,
+        created_at timestamptz NOT NULL
+      );
+      CREATE INDEX handoff_ticket_event_ticket_idx ON handoff_ticket_event (session_id, ticket_id, seq);
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.
