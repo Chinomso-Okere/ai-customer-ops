@@ -13,10 +13,10 @@ describe("runtime model selection", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AGENT_MODEL", "scripted");
     vi.stubEnv("DATABASE_URL", "");
-    const { getDemoSessionService } = await import("./runtime");
+    const { getDemoSessionService, ScriptedModelRefusedInProductionError } = await import("./runtime");
 
-    await expect(getDemoSessionService()).rejects.toThrow(/dev-only.*production/);
+    await expect(getDemoSessionService()).rejects.toBeInstanceOf(ScriptedModelRefusedInProductionError);
     // It stays refused on the next request: nothing is cached.
-    await expect(getDemoSessionService()).rejects.toThrow(/dev-only/);
+    await expect(getDemoSessionService()).rejects.toBeInstanceOf(ScriptedModelRefusedInProductionError);
   });
 });

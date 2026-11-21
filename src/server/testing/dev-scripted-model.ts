@@ -23,7 +23,7 @@ import { assertValidMessages, reply, text, toolCall } from "./scripted-model-cli
 export class DevScriptedModelClient implements ModelClient {
   async createMessage(request: ModelRequest): Promise<ModelResponse> {
     assertValidMessages(request.messages);
-    return route(request.messages);
+    return route(requestContext(request.messages));
   }
 }
 
@@ -77,6 +77,22 @@ function toolRuns(messages: readonly BetaMessageParam[]): ToolRun[] {
 
 const customerTexts = (messages: readonly BetaMessageParam[]): string[] =>
   messages.filter(isCustomerMessage).map((m) => m.content as string);
+
+/** Everything the router reads from one request, worked out once. */
+interface RequestContext {
+  messages: readonly BetaMessageParam[];
+  runs: ToolRun[];
+  /** Every Customer message, oldest first. */
+  texts: string[];
+  /** The Customer's latest message. */
+  latestText: string;
+  details: Details;
+}
+
+function requestContext(messages: readonly BetaMessageParam[]): RequestContext {
+  const texts = customerTexts(messages);
+  return { messages, runs: toolRuns(messages), texts, latestText: last(texts)!, details: detailsFrom(texts) };
+}
 
 // ---------------------------------------------------------------------------
 // Extracting what the Customer said (kept as typed: the tools normalise)
@@ -148,7 +164,7 @@ const BOOKING = /(\bbook\w*|appointment|availab\w*|\bslots?\b|\bservice\b|\brepa
 const YES = /\b(yes|yeah|yep|yup|confirm\w*|go ahead|sure|ok|okay|please do|that'?s right|correct|works for me)\b/i;
 const NO = /\b(no|nope|don'?t|do not|cancel|stop|not now|wrong)\b/i;
 
-/** The latest Customer message that names a topic decides the flow; lookups beat bookings. */
+/** The latest Customer message that names a topic decides the flow; Job lookups beat requests to book. */
 function currentFlow(texts: string[]): "lookup" | "booking" | undefined {
   for (const t of [...texts].reverse()) {
     if (LOOKUP.test(t)) return "lookup";
@@ -160,22 +176,23 @@ function currentFlow(texts: string[]): "lookup" | "booking" | undefined {
 // ---------------------------------------------------------------------------
 // Routing
 
-function route(messages: readonly BetaMessageParam[]): ModelResponse {
-  const runs = toolRuns(messages);
+/** The reply to the "You're welcome" kind of message once the Customer's business is done. */
+const ANYTHING_ELSE_REPLY = "You're welcome! Is there anything else I can help with?";
+
+function route(ctx: RequestContext): ModelResponse {
+  const { messages, runs } = ctx;
   const lastMessage = messages.at(-1)!;
   const turnStart = messages.findLastIndex(isCustomerMessage);
   const thisTurn = runs.filter((r) => r.at > turnStart);
   // The last message is tool results: say what happened. Otherwise a Customer turn is starting.
   if (lastMessage.role === "user" && typeof lastMessage.content !== "string" && thisTurn.length > 0) {
-    return afterTool(last(thisTurn)!, runs, messages);
+    return afterTool(last(thisTurn)!, ctx);
   }
-  return startTurn(messages, runs);
+  return startTurn(ctx);
 }
 
-function startTurn(messages: readonly BetaMessageParam[], runs: ToolRun[]): ModelResponse {
-  const texts = customerTexts(messages);
-  const now = last(texts)!;
-  const details = detailsFrom(texts);
+function startTurn(ctx: RequestContext): ModelResponse {
+  const { texts, latestText: now, runs } = ctx;
 
   // 1. A proposal is waiting for the Customer's answer.
   const pending = pendingProposal(runs);
@@ -202,12 +219,12 @@ function startTurn(messages: readonly BetaMessageParam[], runs: ToolRun[]): Mode
   if (PRICE.test(now)) return reply([text(priceAnswer(now))]);
 
   const flow = currentFlow(texts);
-  if (flow === "lookup") return lookup(now, details, runs);
-  if (flow === "booking") return booking(texts, now, details, runs, messages);
+  if (flow === "lookup") return lookup(ctx);
+  if (flow === "booking") return booking(ctx);
 
   return reply([
     text(
-      "Hi, I'm the Apex assistant (scripted dev mode). I can quote prices, check availability and book a visit, or look up one of your Jobs. What would you like to do?",
+      "Hi, I'm Apex (scripted dev mode). I can quote prices, check Availability and book a Visit, or look up one of your Jobs. What would you like to do?",
     ),
   ]);
 }
@@ -235,11 +252,12 @@ function priceAnswer(question: string): string {
 
 // --- Verification and Job lookup -------------------------------------------
 
-function lookup(now: string, details: Details, runs: ToolRun[]): ModelResponse {
+function lookup(ctx: RequestContext): ModelResponse {
+  const { latestText: now, details, runs } = ctx;
   const verification = last(runs.filter((r) => r.name === "verify_customer" && r.ok && r.data.verified === true));
   const givesDetails = !!(JOB_REFERENCE.test(now) || POSTCODE.test(now) || EMAIL.test(now));
   if (verification && !LOOKUP.test(now) && !givesDetails) {
-    return reply([text("You're welcome! Is there anything else I can help with?")]);
+    return reply([text(ANYTHING_ELSE_REPLY)]);
   }
   if (verification) {
     const jobs: { jobReference: string; jobStatus: string; description: string }[] = verification.data.jobs ?? [];
@@ -256,13 +274,13 @@ function lookup(now: string, details: Details, runs: ToolRun[]): ModelResponse {
   }
 
   const jobReference = details.jobReference;
-  const pathA = jobReference && (details.postcode || details.email);
-  const pathB = details.fullName && details.postcode && details.email;
-  if ((pathA || pathB) && givesDetails) {
+  const byJobReference = jobReference && (details.postcode || details.email);
+  const byNameAndContact = details.fullName && details.postcode && details.email;
+  if ((byJobReference || byNameAndContact) && givesDetails) {
     return reply([
       toolCall("verify_customer", {
-        jobReference: pathA ? jobReference : null,
-        fullName: pathA ? null : details.fullName,
+        jobReference: byJobReference ? jobReference : null,
+        fullName: byJobReference ? null : details.fullName,
         postcode: details.postcode ?? null,
         email: details.email ?? null,
       }),
@@ -279,15 +297,17 @@ const firstName = (name: unknown) => (typeof name === "string" ? name.split(" ")
 const jobList = (jobs: { jobReference: string; description: string }[]) =>
   jobs.map((j) => `${j.jobReference} (${j.description})`).join("; ");
 
-// --- Availability and Booking ----------------------------------------------
+// --- Availability and Jobs -------------------------------------------------
 
-function booking(
-  texts: string[],
-  now: string,
-  details: Details,
-  runs: ToolRun[],
-  messages: readonly BetaMessageParam[],
-): ModelResponse {
+/** One Time Window the Agent offered, as `get_availability` returns it. */
+interface OfferedWindow {
+  date: string;
+  timeWindow: string;
+  label: string;
+}
+
+function booking(ctx: RequestContext): ModelResponse {
+  const { messages, latestText: now, details, runs } = ctx;
   if (!details.issueType) {
     return reply([text("Happy to help. Which service do you need: Boiler Service, Boiler Repair, Radiators & Heating, AC Repair & Install or Heat Pump?")]);
   }
@@ -297,28 +317,28 @@ function booking(
 
   const availability = last(runs.filter((r) => r.name === "get_availability" && r.ok && Array.isArray(r.data.windows)));
   const fromDate = ISO_DATE.exec(now)?.[0] ?? null;
-  const squash = (v: unknown) => String(v).replace(/\s+/g, "").toLowerCase();
+  const comparablePostcode = (v: unknown) => String(v).replace(/\s+/g, "").toLowerCase();
   const changedSearch =
     !!availability &&
     (availability.input.issueType !== details.issueType ||
-      squash(availability.input.postcode) !== squash(details.postcode) ||
+      comparablePostcode(availability.input.postcode) !== comparablePostcode(details.postcode) ||
       (fromDate !== null && availability.input.fromDate !== fromDate));
-  // A finished Booking ends that search: only a new booking request starts another.
+  // A confirmed Job ends that search: only a new request to book starts another.
   const bookedSince = !!availability && runs.some((r) => r.name === "confirm_action" && r.ok && r.at > availability.at);
-  if (bookedSince && !BOOKING.test(now)) return reply([text("You're welcome! Is there anything else I can help with?")]);
+  if (bookedSince && !BOOKING.test(now)) return reply([text(ANYTHING_ELSE_REPLY)]);
   if (!availability || changedSearch || bookedSince) {
     return reply([toolCall("get_availability", { issueType: details.issueType, postcode: details.postcode, fromDate })]);
   }
 
-  const windows: { date: string; timeWindow: string; label: string }[] = availability.data.windows;
-  if (windows.length === 0) return reply([text("I couldn't find a free slot in the next two weeks. I can pass this to the team if you like.")]);
+  const windows: OfferedWindow[] = availability.data.windows;
+  if (windows.length === 0) return reply([text("I couldn't find any Availability in the next two weeks. I can pass this to the team if you like.")]);
 
-  // Look for the Customer's pick in what they have said since the slots were offered.
+  // Look for the Customer's pick in what they have said since the Time Windows were offered.
   const since = messages.slice(availability.at).filter(isCustomerMessage).map((m) => m.content as string);
-  const pick = last(since.map((t) => pickWindow(t, windows)).filter((w): w is (typeof windows)[number] => !!w));
+  const pick = last(since.map((t) => pickWindow(t, windows)).filter((w): w is OfferedWindow => !!w));
   const missing = [details.fullName ? "" : "full name", details.email ? "" : "email address"].filter(Boolean);
 
-  if (!pick) return reply([text(`${offer(details.issueType, windows)} Which would you like?${missing.length ? ` I'll also need your ${missing.join(" and ")}.` : ""}`)]);
+  if (!pick) return reply([text(`${listOfferedWindows(details.issueType, windows)} Which would you like?${missing.length ? ` I'll also need your ${missing.join(" and ")}.` : ""}`)]);
   if (missing.length) return reply([text(`${pick.label} it is. To book it I need your ${missing.join(" and ")}.`)]);
   return reply([
     toolCall("propose_booking", {
@@ -332,26 +352,28 @@ function booking(
   ]);
 }
 
-const offer = (issueType: string, windows: { label: string }[]) =>
+const listOfferedWindows = (issueType: string, windows: { label: string }[]) =>
   `The earliest times for ${issueType}: ${windows.map((w, i) => `${i + 1}) ${w.label}`).join("; ")}.`;
 
+/** Ordinal words and the index they name in the offered windows (-1 counts from the end). */
+const ORDINAL_WORD_INDEX: Record<string, number> = {
+  first: 0,
+  "1st": 0,
+  earliest: 0,
+  second: 1,
+  "2nd": 1,
+  third: 2,
+  "3rd": 2,
+  last: -1,
+};
+
 /** Which offered window the Customer chose: by ordinal, date, AM/PM or a plain yes. */
-function pickWindow<W extends { date: string; timeWindow: string; label: string }>(t: string, windows: W[]): W | undefined {
+function pickWindow(t: string, windows: OfferedWindow[]): OfferedWindow | undefined {
   const s = t.replace(EMAIL, " ").replace(POSTCODE, " ");
   const ordinal = /(?:^\s*|\b(?:option|number|slot|no\.?)\s*)([123])\s*[.)]?\s*$|\b(first|1st|earliest|second|2nd|third|3rd|last)\b/i.exec(s);
   const word = ordinal?.[2]?.toLowerCase();
-  const index = ordinal?.[1]
-    ? Number(ordinal[1]) - 1
-    : word === "first" || word === "1st" || word === "earliest"
-      ? 0
-      : word === "second" || word === "2nd"
-        ? 1
-        : word === "third" || word === "3rd"
-          ? 2
-          : word === "last"
-            ? windows.length - 1
-            : -1;
-  if (index >= 0) return windows[index];
+  const index = ordinal?.[1] ? Number(ordinal[1]) - 1 : word ? ORDINAL_WORD_INDEX[word] : undefined;
+  if (index !== undefined) return windows.at(index);
   const iso = ISO_DATE.exec(s)?.[0];
   const sameDay = iso ? windows.filter((w) => w.date === iso) : windows;
   const half = /\b(am|morning)\b/i.test(s) ? "AM" : /\b(pm|afternoon)\b/i.test(s) ? "PM" : undefined;
@@ -364,15 +386,14 @@ function pickWindow<W extends { date: string; timeWindow: string; label: string 
 // ---------------------------------------------------------------------------
 // After a tool ran: tell the Customer what happened
 
-function afterTool(run: ToolRun, runs: ToolRun[], messages: readonly BetaMessageParam[]): ModelResponse {
+function afterTool(run: ToolRun, ctx: RequestContext): ModelResponse {
   const { data } = run;
   if (!run.ok) return reply([text(`Sorry, I couldn't do that: ${String(data.error ?? "something went wrong")}`)]);
 
   switch (run.name) {
-    case "get_availability": {
-      // Offering the slots (and asking for what is missing) is the same as the router's next step.
-      return booking(customerTexts(messages), last(customerTexts(messages))!, detailsFrom(customerTexts(messages)), runs, messages);
-    }
+    case "get_availability":
+      // Offering the Time Windows (and asking for what is missing) is the same as the router's next step.
+      return booking(ctx);
     case "propose_booking": {
       const b = data.readBack;
       return reply([
@@ -387,11 +408,8 @@ function afterTool(run: ToolRun, runs: ToolRun[], messages: readonly BetaMessage
             : "That's done.",
         ),
       ]);
-    case "verify_customer": {
-      if (data.verified) {
-        const next = lookup(last(customerTexts(messages))!, {}, runs);
-        return next;
-      }
+    case "verify_customer":
+      if (data.verified) return lookup(ctx);
       return reply([
         text(
           data.locked
@@ -399,12 +417,11 @@ function afterTool(run: ToolRun, runs: ToolRun[], messages: readonly BetaMessage
             : `Those details didn't match our records. Please check them and try again (${data.attemptsRemaining} attempts left).`,
         ),
       ]);
-    }
     case "get_job_details":
       return reply([text(describeJob(data))]);
     case "create_handoff_ticket":
       return reply([
-        text(`I'm sorry about that. I've passed this to the Apex team (ticket ${data.ticketReference}) and someone will follow up with you.`),
+        text(`I'm sorry about that. I've passed this to the Apex team (Handoff Ticket ${data.ticketReference}) and someone will follow up with you.`),
       ]);
     default:
       return reply([text("Done.")]);
@@ -417,6 +434,6 @@ function describeJob(job: Record<string, any>): string {
   return [
     `${job.jobReference} (${job.description}) is ${job.jobStatus}.`,
     ...parts.map((p) => `Part: ${p.partName}, ${p.partsStatus}, expected ${p.expectedArrival}.`),
-    ...visits.map((v) => `Next visit: ${v.date} ${v.timeWindow} with ${v.engineerFirstName}.`),
+    ...visits.map((v) => `Next Visit: ${v.date} ${v.timeWindow} with ${v.engineerFirstName}.`),
   ].join(" ");
 }

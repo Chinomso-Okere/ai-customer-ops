@@ -5,6 +5,8 @@ import { DevScriptedModelClient } from "@/server/testing/dev-scripted-model";
 
 // Seam: the Demo Session service, driven by the dev-only scripted model
 // (what `AGENT_MODEL=scripted npm run dev` runs), through the real Agent.
+// Assertions are on facts (tools called, Jobs, Handoff Tickets, tool results),
+// not on the router's own phrasing.
 const WEDNESDAY = london("2026-11-18T11:30");
 
 async function chat() {
@@ -15,7 +17,14 @@ async function chat() {
   const say = async (message: string) => (await send(message)).replies.map((r) => r.text).join("\n");
   const dashboard = () => h.service.getDashboardState(sessionId);
   const toolsCalled = async () => (await dashboard()).agentTrace.flatMap((t) => (t.toolName ? [t.toolName] : []));
-  return { send, say, dashboard, toolsCalled };
+  /** The successful results of one tool, parsed, from the Agent Trace. */
+  const resultsOf = async (toolName: string) =>
+    (await dashboard()).agentTrace
+      .filter((t) => t.toolName === toolName && !t.isError && t.result)
+      .map((t) => JSON.parse(t.result!) as Record<string, any>);
+  const inputsOf = async (toolName: string) =>
+    (await dashboard()).agentTrace.filter((t) => t.toolName === toolName).map((t) => t.input as Record<string, any>);
+  return { conversationId, send, say, dashboard, toolsCalled, resultsOf, inputsOf };
 }
 
 const scenario = (label: string) => SCENARIOS.find((s) => s.label === label)!.message;
@@ -28,62 +37,75 @@ describe("dev scripted model", () => {
     expect(await c.toolsCalled()).toEqual([]);
   });
 
-  it("checks Availability, proposes and confirms a Booking that shows up on the dashboard", async () => {
+  it("checks Availability, proposes and confirms a Job that shows up on the dashboard", async () => {
     const c = await chat();
+    const patJob = async () => (await c.dashboard()).jobs.find((j) => j.customer.fullName === "Pat Example");
 
-    expect(await c.say(scenario("Book a boiler service"))).toMatch(/postcode/i);
+    await c.say(scenario("Book a boiler service"));
+    expect(await c.toolsCalled()).toEqual([]); // the postcode is still missing
 
-    const offered = await c.say("My postcode is SW4 7AB");
-    expect(offered).toMatch(/1\) .*(AM|PM)/);
-    expect(offered).toMatch(/full name/i);
+    await c.say("My postcode is SW4 7AB");
+    expect(await c.toolsCalled()).toEqual(["get_availability"]);
+    const [availability] = await c.resultsOf("get_availability");
+    const windows: Array<{ date: string; timeWindow: string }> = availability!.windows;
+    expect(windows.length).toBeGreaterThan(1);
 
-    expect(await c.say("the second one please")).toMatch(/full name and email/i);
+    await c.say("the second one please");
+    expect(await c.toolsCalled()).toEqual(["get_availability"]); // name and email are still missing
 
-    expect(await c.say("Pat Example, pat.example@example.com")).toMatch(/Shall I go ahead/);
+    await c.say("Pat Example, pat.example@example.com");
+    expect(await c.toolsCalled()).toEqual(["get_availability", "propose_booking"]);
+    const [proposal] = await c.resultsOf("propose_booking");
+    expect(proposal!.pendingActionId).toBeDefined();
     // Nothing is booked until the Customer agrees.
-    expect((await c.dashboard()).jobs.some((j) => j.customer.fullName === "Pat Example")).toBe(false);
+    expect(await patJob()).toBeUndefined();
 
-    const confirmed = await c.say("Yes please");
-    const jobReference = /APX-\d+/.exec(confirmed)?.[0];
-    expect(jobReference).toBeDefined();
-    const job = (await c.dashboard()).jobs.find((j) => j.jobReference === jobReference);
-    expect(job).toMatchObject({ issueType: "Boiler Service", jobStatus: "Scheduled", customer: { fullName: "Pat Example" } });
+    await c.say("Yes please");
     expect(await c.toolsCalled()).toEqual(["get_availability", "propose_booking", "confirm_action"]);
+    expect((await c.inputsOf("confirm_action")).map((i) => i.pendingActionId)).toEqual([proposal!.pendingActionId]);
+    const job = await patJob();
+    expect(job).toMatchObject({ issueType: "Boiler Service", jobStatus: "Scheduled" });
+    expect(job!.visits).toMatchObject([{ date: windows[1]!.date, timeWindow: windows[1]!.timeWindow }]);
 
-    // A finished Booking is not re-proposed by later chat.
+    // A finished Job is not re-proposed by later chat.
+    const jobCount = (await c.dashboard()).jobs.length;
     expect(await c.say("How much is an annual boiler service?")).toContain("£89");
-    expect(await c.say("thanks")).toMatch(/anything else/i);
+    await c.say("thanks");
     expect(await c.toolsCalled()).toEqual(["get_availability", "propose_booking", "confirm_action"]);
+    expect((await c.dashboard()).jobs).toHaveLength(jobCount);
   });
 
   it("looks up a Job only after verifying a demo-friendly Customer", async () => {
     const c = await chat();
 
-    expect(await c.say(scenario("Where's my part?"))).toMatch(/Job Reference|full name/i);
+    await c.say(scenario("Where's my part?"));
     expect(await c.toolsCalled()).toEqual([]); // nothing revealed or attempted yet
 
     const answer = await c.say("Sarah Mitchell, SW4 7AB, sarah.mitchell@example.com");
+    expect(await c.toolsCalled()).toEqual(["verify_customer", "get_job_details"]);
+    expect(await c.resultsOf("verify_customer")).toMatchObject([{ verified: true }]);
     expect(answer).toContain("Diverter valve");
     expect(answer).toContain("Awaiting Parts");
-    expect(await c.toolsCalled()).toEqual(["verify_customer", "get_job_details"]);
   });
 
   it("reveals nothing when the details do not match", async () => {
     const c = await chat();
     await c.say(scenario("Where's my part?"));
     const answer = await c.say("Sarah Mitchell, SW4 7AB, wrong.email@example.com");
-    expect(answer).toMatch(/didn't match/);
-    expect(answer).not.toContain("Diverter valve");
     expect(await c.toolsCalled()).toEqual(["verify_customer"]);
+    expect(await c.resultsOf("verify_customer")).toMatchObject([{ verified: false, locked: false }]);
+    expect(answer).not.toContain("Diverter valve");
   });
 
   it("escalates a refund request as a Handoff Ticket", async () => {
     const c = await chat();
     const answer = await c.say(scenario("I want a refund"));
-    const { handoffTickets } = await c.dashboard();
-    const ticket = handoffTickets.find((t) => t.escalationReason === "Out of Policy" && t.summary.includes("refund"));
-    expect(ticket).toBeDefined();
-    expect(answer).toContain(ticket!.ticketReference);
+    expect(await c.toolsCalled()).toEqual(["create_handoff_ticket"]);
+    const tickets = (await c.dashboard()).handoffTickets.filter(
+      (t) => t.conversationId === c.conversationId && t.escalationReason === "Out of Policy",
+    );
+    expect(tickets).toHaveLength(1);
+    expect(answer).toContain(tickets[0]!.ticketReference);
   });
 
   it("leaves the gas Safety Script to the pre-model hook", async () => {
@@ -93,8 +115,10 @@ describe("dev scripted model", () => {
     expect(await c.toolsCalled()).toEqual([]);
   });
 
-  it("falls back to a help message for small talk", async () => {
+  it("answers small talk without calling any tool", async () => {
     const c = await chat();
-    expect(await c.say("Hello there")).toMatch(/prices|availability/i);
+    const { replies } = await c.send("Hello there");
+    expect(replies.map((r) => r.kind)).toEqual(["text"]);
+    expect(await c.toolsCalled()).toEqual([]);
   });
 });

@@ -23,6 +23,14 @@ async function createDatabase(): Promise<Database> {
   return createPGliteDatabase();
 }
 
+/** `AGENT_MODEL=scripted` was set in a production build. */
+export class ScriptedModelRefusedInProductionError extends Error {
+  constructor() {
+    super("AGENT_MODEL=scripted is a dev-only setting and is refused when NODE_ENV=production. Unset it.");
+    this.name = "ScriptedModelRefusedInProductionError";
+  }
+}
+
 /**
  * The real model when ANTHROPIC_API_KEY is set; otherwise the Agent apologises
  * on every turn. `AGENT_MODEL=scripted` (dev only) swaps in the scripted model
@@ -36,7 +44,7 @@ async function createModelClient(): Promise<ModelClient> {
       const { DevScriptedModelClient } = await import("./testing/dev-scripted-model");
       return new DevScriptedModelClient();
     }
-    throw new Error("AGENT_MODEL=scripted is a dev-only setting and is refused when NODE_ENV=production. Unset it.");
+    throw new ScriptedModelRefusedInProductionError();
   }
   return process.env.ANTHROPIC_API_KEY ? new AnthropicModelClient() : unconfiguredModelClient;
 }

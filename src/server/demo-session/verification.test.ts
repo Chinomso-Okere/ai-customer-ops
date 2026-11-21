@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHarness, london } from "@/server/testing/harness";
+import { queuedNotes } from "@/server/testing/queued-notes";
 import {
   ScriptedModelClient,
   lastToolResults,
@@ -139,13 +140,11 @@ describe("Verification and Job lookup", () => {
     const h = await chatHarness();
     const sarah = h.customer("Sarah Mitchell");
     const wrong = { jobReference: sarah.jobReferences[0], postcode: "SE1 1AA" };
-    // Each turn's system message is the one-line current time, plus a line per queued note.
-    const turnsWithQueuedNotes = () =>
-      h.model.requests.at(-1)!.messages.filter((m) => (m.role as string) === "system" && String(m.content).includes("\n")).length;
+    const notesDelivered = () => queuedNotes(h.model.requests.at(-1)!, "all-turns");
 
     expect((await callTool(h, "verify_customer", wrong)).json).toMatchObject({ attemptsRemaining: 2 });
     expect((await callTool(h, "verify_customer", wrong)).json).toMatchObject({ attemptsRemaining: 1 });
-    expect(turnsWithQueuedNotes()).toBe(0);
+    expect(notesDelivered()).toHaveLength(0);
     const third = await callTool(h, "verify_customer", wrong);
     expect(third.json).toMatchObject({ verified: false, locked: true, attemptsRemaining: 0 });
 
@@ -154,7 +153,7 @@ describe("Verification and Job lookup", () => {
     expect((await callTool(h, "get_job_details", { jobReference: sarah.jobReferences[0] })).isError).toBe(true);
 
     // The lock queues exactly one system note, delivered with the next Customer message.
-    expect(turnsWithQueuedNotes()).toBe(1);
+    expect(notesDelivered()).toHaveLength(1);
 
     // A fresh conversation in the same Demo Session is not locked.
     const other = await h.service.openConversation(h.sessionId, undefined);

@@ -40,6 +40,15 @@ once a later Customer message arrives.
    `src/components/ChatWidget.tsx` (see `safety_script`).
 4. Assert it in evals with `replied(kind)` (`src/evals/facts.ts`).
 
+## Add a migration
+
+Append it to the `migrations` array in `src/server/db/migrations.ts`. Every new
+table needs `session_id uuid NOT NULL REFERENCES demo_session(id) ON DELETE
+CASCADE`, so resetting a Demo Session removes its rows.
+`src/server/db/schema-invariants.test.ts` enforces both the cascade and that
+migration ids are unique and increasing, so a collision between branches fails
+the test.
+
 ## Escalation state for the model
 
 Per `README.md`, queue it with `ctx.enqueueSystemNote(text)`. When the server
@@ -99,6 +108,8 @@ over HTTP: `POST /api/demo-session`, `POST /api/conversation`, then
 - **Tool refusals carry a `code`** (`ToolErrorCode` in `types.ts`; shared
   entries in `TOOL_ERRORS`). Tests assert `code`, so the `error` wording can
   change freely.
+- **Optional fields in strict tool schemas** are emitted in schema order, so
+  make them required and nullable; see "Add a domain tool" in `README.md`.
 - **Email comparisons** use `sqlEmailEquals(column, param)` from
   `@/server/verification`.
 
