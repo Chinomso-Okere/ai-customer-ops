@@ -10,16 +10,19 @@ const LOCKED_GUIDANCE =
 export const verifyCustomer: AgentTool = {
   name: "verify_customer",
   description:
-    "Verifies the Customer's identity before anything about their Jobs is shared. Call it when the Customer wants to look up, check, change or ask about an existing Job, Visit or Parts Order. Pass either jobReference with postcode and/or email (Path A), or fullName, postcode and email (Path B, when the Job Reference is lost). Pass details exactly as the Customer typed them; omit fields they did not give. Only call it once the Customer has given a complete set.",
+    "Verifies the Customer's identity before anything about their Jobs is shared. Call it when the Customer wants to look up, check, change or ask about an existing Job, Visit or Parts Order. Make ONE call with every detail the Customer has given in this conversation: jobReference with postcode and/or email (Path A), or fullName, postcode and email together (Path B, when the Job Reference is lost). Pass details exactly as the Customer typed them and null for any they have not given. Never split one Customer's details across several calls. Only call it once the Customer has given a complete set.",
+  // Every field is required but nullable: strict tool use emits optional
+  // properties in schema order, so with optional fields a call that starts with
+  // a later field (e.g. fullName) can't carry the earlier ones (eval run 1).
   inputSchema: {
     type: "object",
     properties: {
-      jobReference: { type: "string", description: "Job Reference, e.g. APX-10482" },
-      postcode: { type: "string", description: "Postcode as the Customer gave it" },
-      email: { type: "string", description: "Email as the Customer gave it" },
-      fullName: { type: "string", description: "Full name as the Customer gave it" },
+      jobReference: { type: ["string", "null"], description: "Job Reference, e.g. APX-10482; null if not given" },
+      fullName: { type: ["string", "null"], description: "Full name as the Customer gave it; null if not given" },
+      postcode: { type: ["string", "null"], description: "Postcode as the Customer gave it; null if not given" },
+      email: { type: ["string", "null"], description: "Email as the Customer gave it; null if not given" },
     },
-    required: [],
+    required: ["jobReference", "fullName", "postcode", "email"],
     additionalProperties: false,
   },
   promptGuidance:
