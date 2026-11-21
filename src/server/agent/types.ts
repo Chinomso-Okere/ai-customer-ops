@@ -15,7 +15,11 @@ export type ChatMessageKind =
   /** The fixed apology when the model could not be reached or the turn failed. */
   | "agent_error"
   /** The fixed reply once the Demo Session's message cap is reached (#7). */
-  | "message_cap";
+  | "message_cap"
+  /** The fixed Safety Script for an Emergency; payload `{ emergencyKind, title, bullets }`. */
+  | "safety_script"
+  /** A fixed notice that a Handoff Ticket was raised or updated; payload `{ ticketReference, isNewTicket }`. */
+  | "handoff_notice";
 
 /** One message of the Customer-visible transcript. JSON-safe. */
 export interface ChatMessage {

@@ -97,6 +97,11 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); }
 .bubble--agent { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
 .bubble--off_topic_refusal, .bubble--model_refusal { font-style: italic; }
 .bubble--agent_error { background: #ffe3e3; color: var(--critical); border-color: #ffc9c9; }
+/* Safety Script (#4): short, high-contrast bullets. */
+.bubble--safety_script { background: #a51111; color: #fff; border: 2px solid #5c0000; max-width: 95%; white-space: normal; }
+.safety__title { margin: 0 0 6px; font-weight: 800; font-size: 15px; }
+.safety__bullets { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; font-weight: 600; line-height: 1.3; }
+.bubble--handoff_notice { border-left: 4px solid var(--critical); font-weight: 600; }
 
 /* Agent Trace */
 .trace { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
