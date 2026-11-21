@@ -159,6 +159,26 @@ export function replied(kind: ChatMessageKind): Fact {
   });
 }
 
+/**
+ * Two-phase Confirmation as the Customer experienced it: a confirm_action
+ * succeeded for a `proposeTool` proposal, in a later Customer turn than the
+ * proposal (optionally exactly turn `inTurn`, 0-based).
+ */
+export function confirmedLater(proposeTool: string, options: { inTurn?: number } = {}): Fact {
+  const when = options.inTurn === undefined ? "a later Customer turn" : `Customer turn ${options.inTurn + 1}`;
+  return fact(`a ${proposeTool} proposal was confirmed in ${when}`, (w) => {
+    const proposals = toolCalls(w, proposeTool).filter((c) => c.ok && c.result?.pendingActionId);
+    const confirms = toolCalls(w, "confirm_action");
+    const hit = confirms.some((c) => {
+      const proposal = proposals.find((p) => p.result.pendingActionId === c.input.pendingActionId);
+      return (
+        c.ok && proposal !== undefined && c.turn > proposal.turn && (options.inTurn === undefined || c.turn === options.inTurn)
+      );
+    });
+    return hit || `proposals in turns [${proposals.map((p) => p.turn + 1).join(", ")}]; confirms: ${summarise(confirms)}`;
+  });
+}
+
 /** verify_customer returned verified: true (optionally for a matching call). */
 export const verifiedSuccessfully = (where?: (c: ToolCall) => boolean, description = "verify_customer succeeded"): Fact =>
   called("verify_customer", { where: (c) => c.ok && c.result?.verified === true && (!where || where(c)), description });
