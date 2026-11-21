@@ -22,6 +22,22 @@ export class EmptyCustomerMessageError extends Error {
   }
 }
 
+/** No Handoff Ticket with this id in this Demo Session. */
+export class HandoffTicketNotFoundError extends Error {
+  constructor(ticketId: string) {
+    super(`Handoff Ticket not found in this Demo Session: ${ticketId}`);
+    this.name = "HandoffTicketNotFoundError";
+  }
+}
+
+/** The Handoff Ticket's status does not allow this change (e.g. acknowledging a Resolved ticket). */
+export class HandoffTicketStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HandoffTicketStateError";
+  }
+}
+
 /** Too many new Demo Sessions from this visitor's IP in the last hour; they should try again later. */
 export class DemoSessionRateLimitedError extends Error {
   constructor() {

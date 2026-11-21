@@ -10,6 +10,8 @@ export {
   DemoSessionNotFoundError,
   DemoSessionRateLimitedError,
   EmptyCustomerMessageError,
+  HandoffTicketNotFoundError,
+  HandoffTicketStateError,
   InvalidStatusAdvanceError,
 } from "./errors";
 export type * from "./dashboard-state";
