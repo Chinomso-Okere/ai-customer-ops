@@ -29,7 +29,7 @@ const PHRASES: ReadonlyArray<[EmergencyKind, RegExp]> = [
   ["flood_or_sparks", /\bwater(?: is|'s)? (?:pouring|gushing)\b/g],
   ["flood_or_sparks", /\b(?:pouring|gushing) water\b/g],
   ["flood_or_sparks", /\bflood(?:s|ing|ed)?\b/g],
-  ["flood_or_sparks", /\bspark(?:s|ing|ed)\b/g],
+  ["flood_or_sparks", /\bspark(?:s|ing|ed)?\b/g],
 ];
 
 const NEGATIONS = new Set(["no", "not", "never", "without", "nothing", "none", "cannot", "isnt", "dont", "doesnt", "cant", "wasnt", "arent"]);

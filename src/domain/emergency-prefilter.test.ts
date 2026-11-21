@@ -21,6 +21,10 @@ const CASES: Array<[text: string, expected: Expected]> = [
   ["Our basement flooded overnight", "flood_or_sparks"],
   ["sparks coming out of the socket", "flood_or_sparks"],
   ["the boiler is sparking", "flood_or_sparks"],
+  ["there's a spark from the boiler", "flood_or_sparks"],
+  ["I saw a spark when I switched it on", "flood_or_sparks"],
+  ["Spark!", "flood_or_sparks"],
+  ["the thermostat sparked", "flood_or_sparks"],
   // Hedges never suppress
   ["might be carbon monoxide?", "gas_or_co"],
   ["I think I smell gas", "gas_or_co"],
@@ -34,12 +38,16 @@ const CASES: Array<[text: string, expected: Expected]> = [
   ["I don't smell gas", "none"],
   ["I don’t smell gas", "none"],
   ["not a gas leak, the pilot light keeps going out", "none"],
+  ["no sparks, it just clicks", "none"],
+  ["there wasn't a spark", "none"],
   // Near-misses
   ["I'd like a gas boiler service please", "none"],
   ["Is your engineer Gas Safe registered?", "none"],
   ["How much is a gas safety certificate?", "none"],
   ["My gas bill is huge", "none"],
   ["Book a Gas Safe engineer for my boiler", "none"],
+  ["The ignition doesn't spark, the boiler won't light", "none"],
+  ["I live on Sparkford Road", "none"],
   // Mid-sentence and mixed cases
   ["Booking a service for Friday but actually I can smell gas right now", "gas_or_co"],
   ["No gas smell earlier, but now I smell gas", "gas_or_co"],
