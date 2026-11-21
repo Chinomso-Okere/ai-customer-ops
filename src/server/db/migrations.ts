@@ -22,6 +22,30 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
         sort_order  int NOT NULL
       );
       CREATE INDEX engineer_session_idx ON engineer (session_id);
+
+      CREATE TABLE customer (
+        id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id    uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        full_name     text NOT NULL,
+        postcode      text NOT NULL,
+        email         text NOT NULL,
+        phone         text,
+        demo_friendly boolean NOT NULL DEFAULT false,
+        created_at    timestamptz NOT NULL
+      );
+      CREATE INDEX customer_session_idx ON customer (session_id);
+
+      CREATE TABLE job (
+        id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id    uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        job_reference text NOT NULL,
+        customer_id   uuid NOT NULL REFERENCES customer(id) ON DELETE CASCADE,
+        issue_type    text NOT NULL,
+        description   text NOT NULL,
+        job_status    text NOT NULL,
+        created_at    timestamptz NOT NULL,
+        UNIQUE (session_id, job_reference)
+      );
     `,
   },
 ];
