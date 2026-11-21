@@ -90,6 +90,70 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
       );
     `,
   },
+  {
+    id: "0002_agent_conversation",
+    sql: `
+      CREATE TABLE conversation (
+        id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id  uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        created_at  timestamptz NOT NULL
+      );
+      CREATE INDEX conversation_session_idx ON conversation (session_id);
+
+      -- The Customer-visible transcript (what the chat widget shows).
+      CREATE TABLE chat_message (
+        seq             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        id              uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+        session_id      uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        conversation_id uuid NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
+        speaker         text NOT NULL CHECK (speaker IN ('Customer', 'Agent')),
+        kind            text NOT NULL,
+        text            text NOT NULL,
+        payload         jsonb,
+        created_at      timestamptz NOT NULL
+      );
+      CREATE INDEX chat_message_conversation_idx ON chat_message (session_id, conversation_id, seq);
+
+      -- The model's view of the conversation: Messages API entries, append-only,
+      -- stored as the exact JSON sent (text, not jsonb) so replays are byte-identical.
+      CREATE TABLE agent_message (
+        seq             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        session_id      uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        conversation_id uuid NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
+        message         text NOT NULL,
+        created_at      timestamptz NOT NULL
+      );
+      CREATE INDEX agent_message_conversation_idx ON agent_message (session_id, conversation_id, seq);
+
+      -- Notices for the model (escalation state etc.), delivered as a
+      -- mid-conversation system message at the start of the next Customer turn.
+      CREATE TABLE agent_system_note (
+        seq             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        session_id      uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        conversation_id uuid NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
+        text            text NOT NULL,
+        delivered       boolean NOT NULL DEFAULT false,
+        created_at      timestamptz NOT NULL
+      );
+      CREATE INDEX agent_system_note_pending_idx
+        ON agent_system_note (session_id, conversation_id) WHERE NOT delivered;
+
+      -- The Agent Trace: every tool call (and refusal/error) with inputs and result.
+      CREATE TABLE agent_trace_entry (
+        seq             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        id              uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+        session_id      uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        conversation_id uuid NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
+        kind            text NOT NULL,
+        tool_name       text,
+        input           jsonb,
+        result          text,
+        is_error        boolean NOT NULL DEFAULT false,
+        created_at      timestamptz NOT NULL
+      );
+      CREATE INDEX agent_trace_entry_session_idx ON agent_trace_entry (session_id, seq);
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.
