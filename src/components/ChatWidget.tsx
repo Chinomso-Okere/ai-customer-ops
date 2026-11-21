@@ -17,11 +17,23 @@ async function postMessage(text: string): Promise<Response> {
   });
 }
 
+/** A message sent from outside the composer (e.g. the scenario tray); a new `id` sends it. */
+export interface OutgoingChatMessage {
+  id: number;
+  text: string;
+}
+
 /**
  * The Customer's chat with the Agent. A thin client over the Demo Session
  * service; it (re)opens the conversation whenever the Demo Session changes.
  */
-export function ChatWidget({ sessionId }: { sessionId: string | null }) {
+export function ChatWidget({
+  sessionId,
+  outgoing,
+}: {
+  sessionId: string | null;
+  outgoing?: OutgoingChatMessage | null;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
@@ -50,10 +62,9 @@ export function ChatWidget({ sessionId }: { sessionId: string | null }) {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [messages, pending]);
 
-  const send = async (e: FormEvent) => {
-    e.preventDefault();
-    const text = draft.trim();
-    if (!text || pending) return;
+  const sendText = async (raw: string) => {
+    const text = raw.trim();
+    if (!text || pending || !sessionId) return;
     setDraft("");
     setPending(text);
     setError(null);
@@ -73,6 +84,19 @@ export function ChatWidget({ sessionId }: { sessionId: string | null }) {
       setPending(null);
     }
   };
+
+  const send = (e: FormEvent) => {
+    e.preventDefault();
+    void sendText(draft);
+  };
+
+  // Send each outgoing message once, as soon as the chat is free.
+  const lastOutgoingId = useRef<number | null>(null);
+  useEffect(() => {
+    if (!outgoing || outgoing.id === lastOutgoingId.current || !sessionId || pending) return;
+    lastOutgoingId.current = outgoing.id;
+    void sendText(outgoing.text);
+  }, [outgoing, sessionId, pending]); // sendText is recreated each render; deliberately not a dep
 
   return (
     <div className="chat" aria-label="Chat with Apex">

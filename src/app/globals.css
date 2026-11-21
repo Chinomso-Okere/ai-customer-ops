@@ -39,9 +39,39 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); }
 .demo-split__pane { overflow: auto; min-height: 0; }
 .demo-split__pane--site { background: var(--site-bg); border-right: 1px solid var(--border); }
 .demo-split__pane--ops { padding: 16px; }
+/* Mobile: chat and dashboard collapse into tabs. */
+.demo-tabs { display: none; }
 @media (max-width: 900px) {
-  .demo-split { grid-template-columns: 1fr; grid-auto-rows: minmax(60vh, auto); }
+  .demo { height: 100dvh; overflow-x: hidden; }
+  .demo-bar { flex-wrap: wrap; gap: 4px 12px; padding: 8px 12px; }
+  .demo-bar__note { flex-basis: 100%; order: 3; }
+  .demo-bar__title { flex: 1; }
+  .demo-tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .demo-tabs__tab {
+    flex: 1; padding: 10px; border: 0; border-bottom: 3px solid transparent; background: none;
+    font: inherit; font-weight: 600; color: var(--muted); cursor: pointer;
+  }
+  .demo-tabs__tab--active { color: var(--brand); border-bottom-color: var(--brand); }
+  .demo-split { grid-template-columns: minmax(0, 1fr); }
+  .demo-split__pane--site { border-right: 0; }
+  .demo-split--show-site .demo-split__pane--ops,
+  .demo-split--show-ops .demo-split__pane--site { display: none; }
+  .demo-split__pane--ops { padding: 12px; }
+  .site { padding: 16px; }
 }
+
+/* Try a scenario tray */
+.tray { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.tray__title { margin: 0; font-size: 14px; }
+.tray__buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.tray__button { background: var(--site-bg); color: var(--brand); border: 1px solid var(--brand); border-radius: 999px; padding: 4px 10px; font: inherit; font-weight: 600; cursor: pointer; }
+.tray__button:hover:not(:disabled) { background: var(--brand); color: var(--brand-ink); }
+.tray__button:disabled { opacity: 0.5; cursor: default; }
+.tray__customers summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.tray__list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 6px; }
+.tray__customer { border: 1px dashed var(--border); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; overflow-wrap: anywhere; }
+.tray__customer strong { font-size: 13px; }
+.tray__hint { color: var(--high); }
 
 .banner { padding: 8px 12px; border-radius: 6px; }
 .banner--error { background: #ffe3e3; color: var(--critical); }
