@@ -93,6 +93,43 @@ describe("Gas/CO Emergency: no booking until an Operator resolves the ticket", (
     expect(notes).toContain("0800 111 999");
   });
 
+  it("when the Operator resolves the gas Emergency, the model is told through a mid-conversation system message", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "I smell gas");
+    const ticket = await openEmergencyTicket(h);
+    h.model.script(reply([text("Please follow the safety advice.")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "ok, I'm outside");
+    h.model.script(reply([text("Please wait for the gas engineers.")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "still waiting");
+    expect(systemMessagesAfterLastCustomerMessage(h.model.requests.at(-1)!).join(" ")).not.toContain(
+      ticket.ticketReference,
+    );
+
+    await h.service.resolveHandoffTicket(h.sessionId, ticket.id);
+    h.model.script(reply([text("Happy to help with a booking.")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "all sorted now, can I book a repair?");
+
+    const latest = h.model.requests.at(-1)!;
+    expect(latest.system).toEqual(h.model.requests[0]!.system);
+    expect(systemMessagesAfterLastCustomerMessage(latest).join(" ")).toContain(ticket.ticketReference);
+  });
+
+  it("resolving a flood Emergency or a non-Emergency ticket queues no such note", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "water pouring from the ceiling");
+    const ticket = await openEmergencyTicket(h);
+    h.model.script(reply([text("An Engineer can come.")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "ok");
+
+    await h.service.resolveHandoffTicket(h.sessionId, ticket.id);
+    h.model.script(reply([text("Anything else?")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "thanks");
+
+    expect(systemMessagesAfterLastCustomerMessage(h.model.requests.at(-1)!).join(" ")).not.toContain(
+      ticket.ticketReference,
+    );
+  });
+
   it("the block is per conversation, and a flood Emergency doesn't block normal booking", async () => {
     const h = await chatHarness(WEDNESDAY_0930);
     const gasConversation = await h.service.openConversation(h.sessionId, crypto.randomUUID());
