@@ -10,6 +10,7 @@ export {
   DemoSessionNotFoundError,
   DemoSessionRateLimitedError,
   EmptyCustomerMessageError,
+  InvalidStatusAdvanceError,
 } from "./errors";
 export type * from "./dashboard-state";
 export type { AgentTraceEntry, ChatMessage, ChatMessageKind, CustomerTurnResult } from "@/server/agent";

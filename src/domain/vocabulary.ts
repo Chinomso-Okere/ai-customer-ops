@@ -41,3 +41,12 @@ export function parseIssueType(input: unknown): IssueType | undefined {
   const key = input.replace(/\s+/g, " ").trim().toLowerCase();
   return ISSUE_TYPES.find((t) => t.toLowerCase() === key);
 }
+
+/** The forward path a dashboard status advance walks, one step at a time (Cancelled is off it). */
+export const JOB_STATUS_PATH: readonly JobStatus[] = ["Scheduled", "In Progress", "Awaiting Parts", "Completed"];
+
+/** The next status on `path` after `current`; undefined at the end (terminal) or off the path. */
+export function nextStatus<S extends string>(path: readonly S[], current: S): S | undefined {
+  const i = path.indexOf(current);
+  return i < 0 ? undefined : path[i + 1];
+}
