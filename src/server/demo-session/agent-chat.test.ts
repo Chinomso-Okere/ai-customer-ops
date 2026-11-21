@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createHarness, london } from "@/server/testing/harness";
-import { ScriptedModelClient, reply, text } from "@/server/testing/scripted-model-client";
+import {
+  ScriptedModelClient,
+  lastToolResults,
+  reply,
+  text,
+  thinking,
+  toolCall,
+} from "@/server/testing/scripted-model-client";
 
 const WEDNESDAY = london("2026-11-18T11:30");
 
@@ -28,5 +35,74 @@ describe("Agent chat", () => {
     expect(conversation.map((m) => m.speaker)).toEqual(["Customer", "Agent"]);
     expect(conversation[0]!.text).toBe("Hi there");
     expect(result.conversation).toEqual(conversation);
+  });
+
+  it("every tool call is recorded in the Agent Trace with its inputs and result", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    model.script(
+      reply([thinking(), text("Let me check."), toolCall("check_coverage_area", { postcode: "sw4 7aa" })]),
+      reply([text("Yes, we cover SW4.")]),
+    );
+
+    await service.sendCustomerMessage(sessionId, conversationId, "Do you cover SW4 7AA?");
+
+    const { agentTrace } = await service.getDashboardState(sessionId);
+    expect(agentTrace).toHaveLength(1);
+    expect(agentTrace[0]).toMatchObject({
+      kind: "tool_call",
+      conversationId,
+      toolName: "check_coverage_area",
+      input: { postcode: "sw4 7aa" },
+      isError: false,
+    });
+    expect(JSON.parse(agentTrace[0]!.result!)).toMatchObject({ inCoverageArea: true });
+    // The model got exactly what the trace shows.
+    const [result] = lastToolResults(model.requests[1]!);
+    expect(result!.content).toBe(agentTrace[0]!.result);
+  });
+
+  it("parallel tool calls are all answered in one message, and failures go back with is_error", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    model.script(
+      reply([
+        toolCall("check_coverage_area", { postcode: "SE15 4AB" }),
+        toolCall("check_coverage_area", { postcode: "M1 1AE" }),
+        toolCall("check_coverage_area", {}),
+      ]),
+      reply([text("SE15 yes, Manchester no.")]),
+    );
+
+    await service.sendCustomerMessage(sessionId, conversationId, "SE15 4AB or M1 1AE?");
+
+    const results = lastToolResults(model.requests[1]!);
+    expect(results).toHaveLength(3);
+    expect(results.map((r) => r.is_error ?? false)).toEqual([false, false, true]);
+    const { agentTrace } = await service.getDashboardState(sessionId);
+    expect(agentTrace.map((e) => [e.toolName, e.isError])).toEqual([
+      ["check_coverage_area", false],
+      ["check_coverage_area", false],
+      ["check_coverage_area", true],
+    ]);
+    expect(JSON.parse(agentTrace[1]!.result!)).toMatchObject({ inCoverageArea: false });
+  });
+
+  it("an unknown tool name is returned to the model as an error rather than crashing the turn", async () => {
+    const { service, model, sessionId, conversationId } = await chatHarness();
+    model.script(reply([toolCall("launch_rocket", {})]), reply([text("Sorry, I can't do that.")]));
+
+    const result = await service.sendCustomerMessage(sessionId, conversationId, "Launch it");
+
+    expect(result.replies.map((r) => r.kind)).toEqual(["text"]);
+    expect(lastToolResults(model.requests[1]!)[0]!.is_error).toBe(true);
+  });
+
+  it("one Demo Session's Agent Trace never shows another session's tool calls", async () => {
+    const a = await chatHarness();
+    a.model.script(reply([toolCall("check_coverage_area", { postcode: "SW4 7AA" })]), reply([text("Yes.")]));
+    await a.service.sendCustomerMessage(a.sessionId, a.conversationId, "SW4?");
+    const b = await chatHarness();
+
+    expect((await b.service.getDashboardState(b.sessionId)).agentTrace).toEqual([]);
+    expect((await a.service.getDashboardState(a.sessionId)).agentTrace).toHaveLength(1);
   });
 });

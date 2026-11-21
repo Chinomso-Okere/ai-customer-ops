@@ -15,6 +15,7 @@ import {
   type PartsStatus,
   type Urgency,
 } from "@/domain/vocabulary";
+import { readAgentTrace, type AgentTraceEntry } from "@/server/agent/conversation-store";
 import type { Database } from "@/server/db/database";
 
 export interface DashboardEngineer {
@@ -85,6 +86,8 @@ export interface DashboardState {
   handoffTickets: DashboardHandoffTicket[];
   /** Customers whose details the "Try a scenario" tray shows visitors. */
   demoCustomers: DemoCustomer[];
+  /** Every tool the Agent called in this Demo Session (and refusals/errors), oldest first. */
+  agentTrace: AgentTraceEntry[];
 }
 
 export interface DemoCustomer extends DashboardCustomer {
@@ -254,8 +257,11 @@ export async function readDashboardState(
     [sessionId],
   );
 
+  const agentTrace = await readAgentTrace(db, sessionId);
+
   return {
     sessionId,
+    agentTrace,
     demoCustomers: demoCustomers.rows,
     calendar: { days, engineers: engineers.rows, visits: calendarVisits },
     jobs: dashboardJobs,
