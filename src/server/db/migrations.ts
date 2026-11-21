@@ -154,6 +154,17 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
       CREATE INDEX agent_trace_entry_session_idx ON agent_trace_entry (session_id, seq);
     `,
   },
+  {
+    id: "0003_t7_session_rate_limit",
+    sql: `
+      -- Who started the Demo Session (a salted hash of the client IP, never the
+      -- IP itself), for the new-Demo-Sessions-per-IP-per-hour guardrail.
+      ALTER TABLE demo_session ADD COLUMN client_ip_hash text;
+      CREATE INDEX demo_session_client_ip_idx ON demo_session (client_ip_hash, created_at)
+        WHERE client_ip_hash IS NOT NULL;
+      CREATE INDEX demo_session_expires_idx ON demo_session (expires_at);
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.

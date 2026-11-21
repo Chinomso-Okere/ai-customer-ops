@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { MESSAGE_CAP_REPLY, MAX_CUSTOMER_MESSAGES_PER_DEMO_SESSION } from "@/server/agent";
+import { DemoSessionRateLimitedError } from "@/server/demo-session";
 import { createHarness, london } from "@/server/testing/harness";
-import { reply, text } from "@/server/testing/scripted-model-client";
+import { ScriptedModelClient, reply, text } from "@/server/testing/scripted-model-client";
 
 const WEDNESDAY = london("2026-11-18T11:30");
 
 describe("Guardrails", () => {
   it("the 41st message to the Agent in a Demo Session is refused without calling the model", async () => {
-    const { service, model } = await createHarness({ now: WEDNESDAY });
+    const model = new ScriptedModelClient();
+    const { service } = await createHarness({ now: WEDNESDAY, modelClient: model });
     const sessionId = await service.createDemoSession();
     // The cap counts across every conversation in the Demo Session.
     const first = await service.openConversation(sessionId, undefined);
@@ -37,5 +39,32 @@ describe("Guardrails", () => {
     model.script(reply([text("Hi!")]));
     const other = await service.sendCustomerMessage(otherSession, otherConversation, "Hi");
     expect(other.replies[0]!.kind).toBe("text");
+  });
+
+  it("at most 3 new Demo Sessions per IP per hour; the 4th is refused until the hour has passed", async () => {
+    const { service, clock } = await createHarness({ now: WEDNESDAY });
+    const ip = "203.0.113.7";
+
+    const first = await service.createDemoSession({ clientIp: ip });
+    clock.set(london("2026-11-18T11:50"));
+    await service.createDemoSession({ clientIp: ip });
+    await service.openDemoSession(undefined, { clientIp: ip });
+    clock.set(london("2026-11-18T12:29"));
+    await expect(service.createDemoSession({ clientIp: ip })).rejects.toBeInstanceOf(
+      DemoSessionRateLimitedError,
+    );
+    await expect(service.openDemoSession("not-a-session", { clientIp: ip })).rejects.toBeInstanceOf(
+      DemoSessionRateLimitedError,
+    );
+    // Resuming a live Demo Session is not a new one; other IPs are unaffected.
+    expect(await service.openDemoSession(first, { clientIp: ip })).toBe(first);
+    await service.createDemoSession({ clientIp: "198.51.100.20" });
+
+    // An hour after the first, one more is allowed (then refused again).
+    clock.set(london("2026-11-18T12:30"));
+    await service.createDemoSession({ clientIp: ip });
+    await expect(service.createDemoSession({ clientIp: ip })).rejects.toBeInstanceOf(
+      DemoSessionRateLimitedError,
+    );
   });
 });
