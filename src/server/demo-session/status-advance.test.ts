@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InvalidStatusAdvanceError } from "@/server/demo-session";
 import { createHarness, london } from "@/server/testing/harness";
+import { chatHarness, toolTurn, type ChatHarness } from "@/server/testing/tool-turns";
 
 // 2026-11-18 is a Wednesday (GMT).
 const WEDNESDAY_0930 = london("2026-11-18T09:30");
@@ -90,5 +91,49 @@ describe("Status advance: one step forward only", () => {
     );
     const after = (await h.service.getDashboardState(other)).jobs.find((j) => j.id === otherJob.id)!;
     expect(after.jobStatus).toBe("Scheduled");
+  });
+});
+
+/** Verifies Sarah Mitchell (Path A) and returns her Awaiting Parts Job, whose part is Dispatched. */
+async function verifiedSarah(h: ChatHarness) {
+  const state = await h.service.getDashboardState(h.sessionId);
+  const sarah = state.demoCustomers.find((c) => c.fullName === "Sarah Mitchell")!;
+  const job = state.jobs.find((j) => j.customer.fullName === "Sarah Mitchell" && j.jobStatus === "Awaiting Parts")!;
+  const order = state.partsOrders.find((p) => p.jobReference === job.jobReference)!;
+  const verified = await toolTurn(h, "Hi, it's Sarah", "verify_customer", {
+    jobReference: job.jobReference,
+    postcode: sarah.postcode,
+  });
+  expect(verified.ok && verified.result.verified).toBe(true);
+  return { job, order };
+}
+
+describe("Parts Arrived → fitting Visit offer", () => {
+  it("while the part is on its way, Job details carry no fitting offer", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { job, order } = await verifiedSarah(h);
+    expect(order.partsStatus).toBe("Dispatched");
+
+    const details = await toolTurn(h, "Any news on my boiler?", "get_job_details", { jobReference: job.jobReference });
+
+    expect(details.ok && details.result.fittingVisitOffer).toBeNull();
+  });
+
+  it("once the presenter advances the part to Arrived, asking in chat yields the fitting offer with Availability", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { job, order } = await verifiedSarah(h);
+
+    await h.service.advancePartsStatus(h.sessionId, order.id, "Dispatched");
+    const details = await toolTurn(h, "Any news on my boiler?", "get_job_details", { jobReference: job.jobReference });
+
+    expect(details.ok).toBe(true);
+    if (!details.ok) return;
+    expect(details.result.jobStatus).toBe("Awaiting Parts");
+    expect(details.result.fittingVisitOffer).toMatchObject({
+      partName: "Diverter valve",
+      windows: expect.arrayContaining([expect.objectContaining({ date: expect.any(String), timeWindow: expect.any(String) })]),
+    });
+    expect(details.result.fittingVisitOffer.windows.length).toBeGreaterThan(0);
+    expect(details.result.fittingVisitOffer.guidance).toMatch(/propose_fitting_visit/);
   });
 });
