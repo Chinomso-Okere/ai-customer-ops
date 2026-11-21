@@ -80,6 +80,13 @@ export interface DemoSessionService {
     conversationId: string,
     text: string,
   ): Promise<CustomerTurnResult>;
+  /**
+   * Cleanup: deletes every Demo Session past its TTL with all its data (every
+   * session-scoped table cascades from `demo_session`). Live sessions are
+   * untouched. Run on a schedule (see README "Expired-session cleanup").
+   * @returns the deleted Demo Session ids
+   */
+  deleteExpiredDemoSessions(): Promise<string[]>;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -189,6 +196,14 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
         const conversation = await conversations.readChatMessages(db, sessionId, conversationId);
         return { replies, conversation };
       });
+    },
+
+    async deleteExpiredDemoSessions() {
+      const { rows } = await db.query<{ id: string }>(
+        "DELETE FROM demo_session WHERE expires_at <= $1 RETURNING id",
+        [clock.now()],
+      );
+      return rows.map((r) => r.id);
     },
   };
   return service;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MESSAGE_CAP_REPLY, MAX_CUSTOMER_MESSAGES_PER_DEMO_SESSION } from "@/server/agent";
+import type { Database } from "@/server/db/database";
 import { DemoSessionRateLimitedError } from "@/server/demo-session";
 import { createHarness, london } from "@/server/testing/harness";
 import { ScriptedModelClient, reply, text } from "@/server/testing/scripted-model-client";
@@ -67,4 +68,59 @@ describe("Guardrails", () => {
       DemoSessionRateLimitedError,
     );
   });
+
+  it("cleanup deletes expired Demo Sessions with all their data, and leaves live ones untouched", async () => {
+    const model = new ScriptedModelClient();
+    const { service, clock, db } = await createHarness({ now: WEDNESDAY, modelClient: model });
+    const withChat = async () => {
+      const sessionId = await service.createDemoSession();
+      const conversationId = await service.openConversation(sessionId, undefined);
+      model.script(reply([text("Hello!")]));
+      await service.sendCustomerMessage(sessionId, conversationId, "Hi");
+      return { sessionId, conversationId };
+    };
+    const expired = await withChat(); // created 11:30, expires 15:30
+    clock.set(london("2026-11-18T14:00"));
+    const live = await withChat(); // created 14:00, expires 18:00
+    const liveBefore = await service.getDashboardState(live.sessionId);
+
+    clock.set(london("2026-11-18T15:31"));
+    const deleted = await service.deleteExpiredDemoSessions();
+
+    expect(deleted).toContain(expired.sessionId);
+    expect(deleted).not.toContain(live.sessionId);
+    // Every row of every session-scoped table is gone for the expired session.
+    expect(await rowsScopedTo(db, expired.sessionId)).toEqual({});
+    expect(Object.keys(await rowsScopedTo(db, live.sessionId))).toEqual(
+      expect.arrayContaining(["demo_session", "customer", "job", "visit", "chat_message", "agent_message"]),
+    );
+    expect(await service.getDashboardState(live.sessionId)).toEqual(liveBefore);
+    expect(await service.getConversation(live.sessionId, live.conversationId)).toHaveLength(2);
+    // Running it again finds nothing new to delete.
+    expect(await service.deleteExpiredDemoSessions()).not.toContain(expired.sessionId);
+  });
 });
+
+/**
+ * Row counts per table for one Demo Session, over every table with a
+ * `session_id` (found from the schema, so future tables are covered too).
+ * Deleted data is unreachable through the service by design, so this one
+ * check reads the database directly.
+ */
+async function rowsScopedTo(db: Database, sessionId: string): Promise<Record<string, number>> {
+  const { rows: tables } = await db.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND column_name = 'session_id' ORDER BY table_name`,
+  );
+  const counts: Record<string, number> = {};
+  const session = await db.query<{ n: string }>("SELECT count(*) AS n FROM demo_session WHERE id = $1", [sessionId]);
+  if (Number(session.rows[0]!.n) > 0) counts.demo_session = Number(session.rows[0]!.n);
+  for (const { table_name } of tables) {
+    const { rows } = await db.query<{ n: string }>(
+      `SELECT count(*) AS n FROM "${table_name}" WHERE session_id = $1`,
+      [sessionId],
+    );
+    if (Number(rows[0]!.n) > 0) counts[table_name] = Number(rows[0]!.n);
+  }
+  return counts;
+}
