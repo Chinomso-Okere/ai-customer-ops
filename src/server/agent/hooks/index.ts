@@ -8,5 +8,6 @@ import { emergencyPrefilter } from "./emergency-prefilter";
  * Emergency pre-filter (#4, ADR-0002) and the message cap (#7).
  */
 export const PRE_MODEL_HOOKS: readonly PreModelHook[] = [
+  // First, so the Safety Script is shown even once the session's message cap is reached.
   emergencyPrefilter,
 ];

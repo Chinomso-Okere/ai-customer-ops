@@ -170,7 +170,7 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
     `,
   },
   {
-    id: "0004_t4_handoff_ticket_timeline",
+    id: "0005_t4_handoff_ticket_timeline",
     sql: `
       -- Handoff Tickets raised in chat belong to a conversation; seed tickets have none.
       ALTER TABLE handoff_ticket
