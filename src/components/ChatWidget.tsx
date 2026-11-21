@@ -21,12 +21,26 @@ async function postMessage(text: string): Promise<Response> {
  * The Customer's chat with the Agent. A thin client over the Demo Session
  * service; it (re)opens the conversation whenever the Demo Session changes.
  */
-export function ChatWidget({ sessionId }: { sessionId: string | null }) {
+export function ChatWidget({
+  sessionId,
+  onStartNewDemo,
+  startingNewDemo,
+  notice,
+}: {
+  sessionId: string | null;
+  /** Starts a fresh Demo Session (offered once the message cap is reached). */
+  onStartNewDemo: () => void;
+  startingNewDemo: boolean;
+  /** Why a new Demo Session couldn't start (e.g. "try again later"). */
+  notice: string | null;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  /** The Demo Session's message cap was reached: the Agent won't answer any more. */
+  const capped = messages.at(-1)?.kind === "message_cap";
 
   useEffect(() => {
     if (!sessionId) return;
@@ -86,6 +100,16 @@ export function ChatWidget({ sessionId }: { sessionId: string | null }) {
             {m.text}
           </p>
         ))}
+        {capped && (
+          <button className="button chat__start-new-demo" onClick={onStartNewDemo} disabled={startingNewDemo}>
+            {startingNewDemo ? "Starting a new demo…" : "Start a new demo"}
+          </button>
+        )}
+        {capped && notice && (
+          <p className="banner banner--notice" role="status">
+            {notice}
+          </p>
+        )}
         {pending && (
           <>
             <p className="bubble bubble--customer">{pending}</p>
@@ -102,9 +126,9 @@ export function ChatWidget({ sessionId }: { sessionId: string | null }) {
           value={draft}
           maxLength={2000}
           onChange={(e) => setDraft(e.target.value)}
-          disabled={!sessionId}
+          disabled={!sessionId || capped}
         />
-        <button className="button" type="submit" disabled={!sessionId || !!pending || !draft.trim()}>
+        <button className="button" type="submit" disabled={!sessionId || capped || !!pending || !draft.trim()}>
           Send
         </button>
       </form>

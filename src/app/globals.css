@@ -128,3 +128,8 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); }
 .urgency--critical { color: var(--critical); }
 .urgency--high { color: var(--high); }
 .urgency--normal { color: var(--normal); }
+
+/* Guardrails (#7): message cap reply with its "Start a new demo" button; rate-limit notice. */
+.bubble--message_cap { background: #fff4d6; border-color: #f5d98b; }
+.chat__start-new-demo { align-self: flex-start; }
+.banner--notice { background: #fff4d6; color: #5c4400; }
