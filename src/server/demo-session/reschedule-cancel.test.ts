@@ -279,6 +279,35 @@ describe("Reschedule and cancel: guardrails", () => {
   });
 });
 
+describe("Cancelling a fitting Visit", () => {
+  it("returns the Job to Awaiting Parts and re-offers the fitting Visit", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const state = await h.service.getDashboardState(h.sessionId);
+    const sarah = state.demoCustomers.find((c) => c.fullName === "Sarah Mitchell")!;
+    const job = state.jobs.find((j) => j.customer.fullName === "Sarah Mitchell" && j.jobStatus === "Awaiting Parts")!;
+    const order = state.partsOrders.find((p) => p.jobReference === job.jobReference)!;
+    await toolTurn(h, "Hi, it's Sarah", "verify_customer", { jobReference: job.jobReference, postcode: sarah.postcode });
+    await h.service.advancePartsStatus(h.sessionId, order.id, "Dispatched");
+    const fitting = await toolTurn(h, "Book the fitting Monday morning", "propose_fitting_visit", {
+      jobReference: job.jobReference,
+      date: "2026-11-23",
+      timeWindow: "AM",
+    });
+    if (!fitting.ok) throw new Error(fitting.error);
+    await toolTurn(h, "yes", "confirm_action", { pendingActionId: fitting.result.pendingActionId });
+    const visit = (await upcomingVisit(h, job.jobReference)) as { visitId: string };
+
+    const proposal = await toolTurn(h, "Actually cancel the fitting", "propose_cancellation", { visitId: visit.visitId });
+    if (!proposal.ok) throw new Error(proposal.error);
+    const cancelled = await toolTurn(h, "yes", "confirm_action", { pendingActionId: proposal.result.pendingActionId });
+
+    expect(cancelled.ok && cancelled.result.jobStatus).toBe("Awaiting Parts");
+    const details = await toolTurn(h, "What now?", "get_job_details", { jobReference: job.jobReference });
+    expect(details.ok && details.result.jobStatus).toBe("Awaiting Parts");
+    expect(details.ok && details.result.fittingVisitOffer).toMatchObject({ partName: "Diverter valve" });
+  });
+});
+
 describe("Capacity: no Availability within the 10-weekday horizon", () => {
   const AC_CUSTOMER = { ...CUSTOMER, issueType: "AC Repair & Install" };
 
