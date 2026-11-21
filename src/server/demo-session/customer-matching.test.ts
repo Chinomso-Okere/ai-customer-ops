@@ -48,4 +48,45 @@ describe("Booking with an email that is already on file", () => {
     expect(state.demoCustomers).toHaveLength(before.demoCustomers.length);
     expect(state.jobs.find((j) => j.jobReference === jobReference)!.customer).toEqual(SARAH);
   });
+
+  it("an email-only match books under a new Customer, flagged on the dashboard as a possible duplicate", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const before = await h.service.getDashboardState(h.sessionId);
+    const sarahBefore = before.demoCustomers.find((c) => c.email === SARAH.email)!;
+    expect(before.possibleDuplicateCustomers).toEqual([]);
+
+    const { jobReference } = await bookFirstWindow(h, {
+      fullName: "Sarah Mitchell",
+      postcode: "SW11 2PL",
+      email: "SARAH.MITCHELL@example.com",
+    });
+
+    const state = await h.service.getDashboardState(h.sessionId);
+    // The existing Customer is untouched.
+    expect(state.demoCustomers.find((c) => c.email === SARAH.email)!.jobReferences).toEqual(
+      sarahBefore.jobReferences,
+    );
+    expect(state.jobs.find((j) => j.jobReference === jobReference)!.customer).toEqual({
+      fullName: "Sarah Mitchell",
+      postcode: "SW11 2PL",
+      email: "sarah.mitchell@example.com",
+    });
+    expect(state.possibleDuplicateCustomers).toEqual([
+      {
+        customer: { fullName: "Sarah Mitchell", postcode: "SW11 2PL", email: "sarah.mitchell@example.com" },
+        jobReferences: [jobReference],
+        possibleDuplicateOf: { ...SARAH, jobReferences: sarahBefore.jobReferences },
+      },
+    ]);
+  });
+
+  it("a different name with the same email and postcode is also only a possible duplicate", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { jobReference } = await bookFirstWindow(h, { ...SARAH, fullName: "Sara Mitchel" });
+
+    const state = await h.service.getDashboardState(h.sessionId);
+    expect(state.possibleDuplicateCustomers.map((d) => [d.customer.fullName, d.jobReferences])).toEqual([
+      ["Sara Mitchel", [jobReference]],
+    ]);
+  });
 });

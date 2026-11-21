@@ -204,6 +204,15 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
         ON pending_action (session_id, conversation_id) WHERE status = 'Pending';
     `,
   },
+  {
+    id: "0006_t11_possible_duplicate_customer",
+    sql: `
+      -- Set when a Booking's email matched this existing Customer but the name or
+      -- postcode didn't: an Operator should check and merge them.
+      ALTER TABLE customer
+        ADD COLUMN possible_duplicate_of uuid REFERENCES customer(id) ON DELETE CASCADE;
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.

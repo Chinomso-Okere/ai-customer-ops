@@ -92,9 +92,17 @@ export async function bookJob(
       ? match.customerId
       : (
           await tx.query<{ id: string }>(
-            `INSERT INTO customer (session_id, full_name, postcode, email, phone, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-            [sessionId, customer.fullName, customer.postcode, customer.email, customer.phone, booking.now],
+            `INSERT INTO customer (session_id, full_name, postcode, email, phone, created_at, possible_duplicate_of)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+            [
+              sessionId,
+              customer.fullName,
+              customer.postcode,
+              customer.email,
+              customer.phone,
+              booking.now,
+              match.kind === "possibleDuplicate" ? match.ofCustomerId : null,
+            ],
           )
         ).rows[0]!.id;
   const jobReference = await nextJobReference(tx, sessionId);
