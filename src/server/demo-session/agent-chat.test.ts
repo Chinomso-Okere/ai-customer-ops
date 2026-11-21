@@ -185,6 +185,83 @@ describe("Agent chat", () => {
     expect((await service.sendCustomerMessage(sessionId, conversationId, "SW4?")).replies[0]!.kind).toBe("text");
   });
 
+  describe("what the model is sent", () => {
+    async function twoTurns() {
+      const h = await chatHarness();
+      h.model.script(
+        reply([thinking(), toolCall("check_coverage_area", { postcode: "SW4 7AA" })]),
+        reply([text("Yes, we cover SW4.")]),
+      );
+      await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "Do you cover SW4 7AA?");
+      h.clock.set(london("2026-11-18T11:42"));
+      h.model.script(reply([text("A boiler service is £89.")]));
+      await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "How much is a boiler service?");
+      return h;
+    }
+
+    it("keeps tools and system prompt byte-identical across a conversation, and only appends to history", async () => {
+      const { model } = await twoTurns();
+      const [first, ...rest] = model.requests;
+      for (const r of rest) {
+        expect(JSON.stringify(r.tools)).toBe(JSON.stringify(first!.tools));
+        expect(JSON.stringify(r.system)).toBe(JSON.stringify(first!.system));
+      }
+      for (let i = 1; i < model.requests.length; i++) {
+        const prev = model.requests[i - 1]!.messages;
+        expect(model.requests[i]!.messages.slice(0, prev.length)).toEqual(prev);
+      }
+      // Thinking blocks go back to the model verbatim.
+      expect(JSON.stringify(model.requests.at(-1)!.messages)).toContain("sig_fake");
+    });
+
+    it("shares the cached prefix across Demo Sessions: only the block after the breakpoint differs", async () => {
+      const a = await twoTurns();
+      const b = await chatHarness();
+      b.clock.set(london("2026-11-18T14:05"));
+      const laterConversation = await b.service.openConversation(b.sessionId, undefined);
+      b.model.script(reply([text("Hi!")]));
+      await b.service.sendCustomerMessage(b.sessionId, laterConversation, "Hi");
+
+      const [reqA, reqB] = [a.model.requests[0]!, b.model.requests[0]!];
+      expect(JSON.stringify(reqB.tools)).toBe(JSON.stringify(reqA.tools));
+      const [stableA, factsA] = reqA.system as { text: string; cache_control?: unknown }[];
+      const [stableB, factsB] = reqB.system as { text: string; cache_control?: unknown }[];
+      expect(stableA!.cache_control).toEqual({ type: "ephemeral" });
+      expect(stableB).toEqual(stableA);
+      expect(factsB!.text).not.toBe(factsA!.text);
+    });
+
+    it("gives the current time as a system notice right after each Customer message", async () => {
+      const { model } = await twoTurns();
+      const messages = model.requests.at(-1)!.messages;
+      const customerTurns = messages
+        .map((m, i) => ({ m, i }))
+        .filter(({ m }) => m.role === "user" && typeof m.content === "string");
+      expect(customerTurns).toHaveLength(2);
+      for (const { i } of customerTurns) expect(messages[i + 1]!.role).toBe("system");
+      expect(JSON.stringify(messages[customerTurns[1]!.i + 1])).toContain("11:42");
+    });
+
+    it("uses auto tool choice, strict schemas sorted by name, adaptive thinking and no sampling settings", async () => {
+      const { model } = await twoTurns();
+      const req = model.requests[0]!;
+      expect(req.tool_choice).toEqual({ type: "auto" });
+      expect(req.thinking).toEqual({ type: "adaptive" });
+      const tools = req.tools as { name: string; strict?: boolean }[];
+      expect(tools.map((t) => t.name)).toEqual([...tools.map((t) => t.name)].sort());
+      expect(tools.every((t) => t.strict === true)).toBe(true);
+      expect(req).not.toHaveProperty("temperature");
+      expect(req).not.toHaveProperty("top_p");
+    });
+
+    it("includes every published Price List figure", async () => {
+      const { model } = await twoTurns();
+      const system = JSON.stringify(model.requests[0]!.system);
+      for (const figure of ["£95", "£89", "£75", "£120"]) expect(system).toContain(figure);
+      expect(system).toMatch(/heat pump survey: free/i);
+    });
+  });
+
   it("a reply cut off at max_tokens mid tool call is retried rather than running a truncated call", async () => {
     const { service, model, sessionId, conversationId } = await chatHarness();
     model.script(
