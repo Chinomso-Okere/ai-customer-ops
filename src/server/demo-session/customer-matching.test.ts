@@ -89,4 +89,29 @@ describe("Booking with an email that is already on file", () => {
       ["Sara Mitchel", [jobReference]],
     ]);
   });
+
+  it("the Agent's tool results never reveal whether the email was on file", async () => {
+    const asAgentSeesIt = async (details: BookingDetails) => {
+      const h = await chatHarness(WEDNESDAY_0930);
+      const { proposal, confirmed } = await bookFirstWindow(h, details);
+      return [proposal, confirmed].map((r) => shape(r.ok ? r.result : r.error));
+    };
+
+    const brandNew = await asAgentSeesIt({ fullName: "Hannah Brooks", postcode: "SW4 7AB", email: "hannah.brooks@example.com" });
+    const fullMatch = await asAgentSeesIt(SARAH);
+    const emailOnly = await asAgentSeesIt({ ...SARAH, postcode: "SW11 2PL" });
+
+    expect(fullMatch).toEqual(brandNew);
+    expect(emailOnly).toEqual(brandNew);
+  });
 });
+
+/** A tool result with the Customer-specific values blanked, leaving only its structure and fixed wording. */
+function shape(value: unknown, key = ""): unknown {
+  if (Array.isArray(value)) return value.map((v) => shape(v));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, shape(v, k)]));
+  }
+  if (typeof value === "string" && key !== "guidance") return typeof value;
+  return value;
+}
