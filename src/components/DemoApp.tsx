@@ -31,6 +31,8 @@ export function DemoApp() {
   /** A friendly notice (e.g. "try again later"), shown instead of an error. */
   const [notice, setNotice] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  /** Which pane shows on narrow (mobile) screens; both show side by side on wider ones. */
+  const [mobileTab, setMobileTab] = useState<"site" | "ops">("site");
   const refresh = useCallback(async function load(reopen = true): Promise<void> {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
     if (response.status === 404 && reopen) {
@@ -97,9 +99,34 @@ export function DemoApp() {
           {resetting ? "Resetting…" : "Reset demo"}
         </button>
       </header>
-      <main className="demo-split">
+      <nav className="demo-tabs" role="tablist" aria-label="Demo views">
+        {(
+          [
+            ["site", "Chat"],
+            ["ops", "Dashboard"],
+          ] as const
+        ).map(([tab, label]) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={mobileTab === tab}
+            className={`demo-tabs__tab${mobileTab === tab ? " demo-tabs__tab--active" : ""}`}
+            onClick={() => setMobileTab(tab)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      <main className={`demo-split demo-split--show-${mobileTab}`}>
         <section className="demo-split__pane demo-split__pane--site" aria-label="Apex website">
-          <ApexWebsite sessionId={state?.sessionId ?? null} onStartNewDemo={reset} startingNewDemo={resetting} notice={notice} />
+          <ApexWebsite
+            sessionId={state?.sessionId ?? null}
+            state={state}
+            onStartNewDemo={reset}
+            startingNewDemo={resetting}
+            notice={notice}
+          />
         </section>
         <section className="demo-split__pane demo-split__pane--ops" aria-label="Operations Dashboard">
           {notice && (

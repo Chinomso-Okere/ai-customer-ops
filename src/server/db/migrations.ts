@@ -155,7 +155,22 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
     `,
   },
   {
-    id: "0003_t7_session_rate_limit",
+    id: "0003_t6_verification",
+    sql: `
+      -- Verification state per conversation (#6): who the Customer proved they
+      -- are, and how many failed attempts they have made (3 = locked).
+      CREATE TABLE conversation_verification (
+        conversation_id      uuid PRIMARY KEY REFERENCES conversation(id) ON DELETE CASCADE,
+        session_id           uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        verified_customer_id uuid REFERENCES customer(id) ON DELETE CASCADE,
+        failed_attempts      int NOT NULL DEFAULT 0,
+        updated_at           timestamptz NOT NULL
+      );
+      CREATE INDEX conversation_verification_session_idx ON conversation_verification (session_id);
+    `,
+  },
+  {
+    id: "0004_t7_session_rate_limit",
     sql: `
       -- Who started the Demo Session (a salted hash of the client IP, never the
       -- IP itself), for the new-Demo-Sessions-per-IP-per-hour guardrail.
