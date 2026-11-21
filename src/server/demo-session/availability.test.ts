@@ -68,6 +68,31 @@ describe("Availability: lead time, earliest 3 and rollover", () => {
     expect((await windowsAt(london("2026-11-21T10:00"))).searchedUntil).toBe("2026-12-04");
   });
 
+  it("a Customer who names a day gets the earliest 3 windows from that day on (eval: Friday AM)", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const res = await toolTurn(h, "Friday morning please", "get_availability", {
+      issueType: "Boiler Service",
+      postcode: "SW4 7AB",
+      fromDate: "2026-11-20",
+    });
+    if (!res.ok) throw new Error(res.error);
+    expect(slots(res.result)).toEqual(["2026-11-20 AM", "2026-11-20 PM", "2026-11-23 AM"]);
+  });
+
+  it("a named day past the search horizon finds nothing, without raising a capacity Escalation", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const res = await toolTurn(h, "Some time in January?", "get_availability", {
+      issueType: "Boiler Service",
+      postcode: "SW4 7AB",
+      fromDate: "2027-01-11",
+    });
+    if (!res.ok) throw new Error(res.error);
+    expect(res.result.windows).toEqual([]);
+    expect(res.result.escalation).toBeUndefined();
+    const state = await h.service.getDashboardState(h.sessionId);
+    expect(state.handoffTickets.filter((t) => t.status === "Open")).toHaveLength(2); // only the seeded ones
+  });
+
   it("accepts the Issue Type in any casing", async () => {
     expect(slots(await windowsAt(WEDNESDAY_0930, "boiler service"))).toHaveLength(3);
   });
