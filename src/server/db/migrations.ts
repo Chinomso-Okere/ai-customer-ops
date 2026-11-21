@@ -180,6 +180,30 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
       CREATE INDEX demo_session_expires_idx ON demo_session (expires_at);
     `,
   },
+  {
+    id: "0005_t5_pending_action",
+    sql: `
+      -- Two-phase Confirmation: a write the Agent has proposed (book,
+      -- reschedule, cancel...) and read back, awaiting the Customer's reply.
+      CREATE TABLE pending_action (
+        id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id               uuid NOT NULL REFERENCES demo_session(id) ON DELETE CASCADE,
+        conversation_id          uuid NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
+        kind                     text NOT NULL,
+        payload                  jsonb NOT NULL,
+        read_back                jsonb NOT NULL,
+        -- chat_message.seq of the Customer message in whose turn it was proposed.
+        proposed_at_customer_seq bigint NOT NULL,
+        status                   text NOT NULL
+          CHECK (status IN ('Pending', 'Confirmed', 'Superseded', 'Failed')),
+        result                   jsonb,
+        created_at               timestamptz NOT NULL,
+        resolved_at              timestamptz
+      );
+      CREATE INDEX pending_action_conversation_idx
+        ON pending_action (session_id, conversation_id) WHERE status = 'Pending';
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.

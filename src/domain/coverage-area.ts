@@ -27,3 +27,9 @@ export function outwardCode(postcode: string): string {
 export function isInCoverageArea(postcode: string): boolean {
   return (COVERAGE_AREA as readonly string[]).includes(outwardCode(postcode));
 }
+
+/** A postcode in display form: normalised, with a space before the inward code ("sw49zz" -> "SW4 9ZZ"). */
+export function formatPostcode(postcode: string): string {
+  const normalised = normalisePostcode(postcode);
+  return normalised.length > 3 ? `${normalised.slice(0, -3)} ${normalised.slice(-3)}` : normalised;
+}

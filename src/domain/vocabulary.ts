@@ -31,3 +31,13 @@ export type Urgency = (typeof URGENCIES)[number];
 
 export const HANDOFF_TICKET_STATUSES = ["Open", "Acknowledged", "Resolved"] as const;
 export type HandoffTicketStatus = (typeof HANDOFF_TICKET_STATUSES)[number];
+
+/**
+ * The Issue Type named by `input`, compared case- and whitespace-insensitively
+ * (strict tool schemas don't guarantee enum casing); undefined if none matches.
+ */
+export function parseIssueType(input: unknown): IssueType | undefined {
+  if (typeof input !== "string") return undefined;
+  const key = input.replace(/\s+/g, " ").trim().toLowerCase();
+  return ISSUE_TYPES.find((t) => t.toLowerCase() === key);
+}
