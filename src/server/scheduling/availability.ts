@@ -48,7 +48,7 @@ export function bookableWindows(now: Date): CandidateWindow[] {
 /**
  * Availability: the bookable Time Windows in which at least one Engineer
  * skilled for `issueType` has no Visit, earliest first. Any Visit (Emergency
- * Visits included) makes its Engineer busy for that window.
+ * Visits included; cancelled Visits not) makes its Engineer busy for that window.
  */
 export async function findAvailability(
   db: Database,
@@ -69,7 +69,7 @@ export async function findAvailability(
   const busy = await db.query<{ engineer_id: string; visit_date: PlainDate; time_window: TimeWindow }>(
     `SELECT engineer_id, visit_date::text AS visit_date, time_window
        FROM visit
-      WHERE session_id = $1 AND visit_date BETWEEN $2 AND $3`,
+      WHERE session_id = $1 AND visit_date BETWEEN $2 AND $3 AND cancelled_at IS NULL`,
     [sessionId, candidates[0]!.date, candidates.at(-1)!.date],
   );
   const busyCells = new Set(busy.rows.map((v) => `${v.engineer_id}|${v.visit_date}|${v.time_window}`));

@@ -182,7 +182,7 @@ export async function readDashboardState(
             v.engineer_id, e.name AS engineer_name, v.is_emergency_visit
        FROM visit v
        JOIN engineer e ON e.id = v.engineer_id AND e.session_id = v.session_id
-      WHERE v.session_id = $1
+      WHERE v.session_id = $1 AND v.cancelled_at IS NULL
       ORDER BY v.visit_date, v.time_window, e.sort_order`,
     [sessionId],
   );
