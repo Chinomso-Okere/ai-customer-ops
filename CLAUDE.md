@@ -1,5 +1,7 @@
 # Apex Heating & Cooling — Agentic Customer Operations Demo
 
+Adding a tool, hook, pending action, reply kind or migration: see `docs/agents/extending.md`.
+
 ## Agent skills
 
 ### Issue tracker
