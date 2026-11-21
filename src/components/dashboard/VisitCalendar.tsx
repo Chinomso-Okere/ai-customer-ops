@@ -9,7 +9,9 @@ export function VisitCalendar({ calendar }: { calendar: DashboardState["calendar
     const key = `${v.engineerId}|${v.date}|${v.timeWindow}`;
     byCell.set(key, [...(byCell.get(key) ?? []), v]);
   }
-  const weeks = [calendar.days.slice(0, 5), calendar.days.slice(5, 10)];
+  // Days are consecutive weekdays from a Monday: one grid per 5 (2 or 3 weeks).
+  const weeks: (typeof calendar.days)[] = [];
+  for (let i = 0; i < calendar.days.length; i += 5) weeks.push(calendar.days.slice(i, i + 5));
 
   return (
     <section className="panel">

@@ -17,6 +17,7 @@ import {
 } from "@/domain/vocabulary";
 import { readAgentTrace, type AgentTraceEntry } from "@/server/agent/conversation-store";
 import type { Database } from "@/server/db/database";
+import { availabilityHorizon } from "@/server/scheduling/availability";
 
 export interface DashboardEngineer {
   id: string;
@@ -73,7 +74,10 @@ export interface CalendarVisit {
 export interface DashboardState {
   sessionId: string;
   calendar: {
-    /** The weekdays of this week and next (from the coming Monday at a weekend). */
+    /**
+     * Weekdays, Monday first, from this week (the coming week at a weekend)
+     * through the week holding the last day of Availability: 2 or 3 weeks.
+     */
     days: CalendarDay[];
     engineers: DashboardEngineer[];
     visits: CalendarVisit[];
@@ -210,7 +214,7 @@ export async function readDashboardState(
     visits: visitsByJob.get(r.id) ?? [],
   }));
 
-  const days = calendarDays(londonDateOf(now));
+  const days = calendarDays(now);
   const shownDates = new Set(days.map((d) => d.date));
   const calendarVisits: CalendarVisit[] = dashboardJobs.flatMap((job) =>
     job.visits
@@ -369,10 +373,18 @@ export function handoffTicketReference(ticketNumber: number): string {
   return `APX-H-${String(ticketNumber).padStart(4, "0")}`;
 }
 
-function calendarDays(today: PlainDate): CalendarDay[] {
-  const monday = isWeekday(today) ? mondayOf(today) : addDays(mondayOf(today), 7);
-  return [0, 1, 2, 3, 4, 7, 8, 9, 10, 11].map((offset) => {
-    const date = addDays(monday, offset);
-    return { date, isToday: date === today };
-  });
+/**
+ * Every weekday from Monday of this week (the coming Monday at a weekend)
+ * through Friday of the week holding the Availability horizon's last day, so
+ * anything bookable, and the seed Visits in that span, is on the calendar.
+ */
+function calendarDays(now: Date): CalendarDay[] {
+  const today = londonDateOf(now);
+  const { from, until } = availabilityHorizon(now);
+  const lastFriday = addDays(mondayOf(until), 4);
+  const days: CalendarDay[] = [];
+  for (let date = mondayOf(from); date <= lastFriday; date = addDays(date, 1)) {
+    if (isWeekday(date)) days.push({ date, isToday: date === today });
+  }
+  return days;
 }
