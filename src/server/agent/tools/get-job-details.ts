@@ -7,7 +7,7 @@ import { TOOL_ERRORS, type AgentTool } from "../types";
 export const getJobDetails: AgentTool = {
   name: "get_job_details",
   description:
-    "Looks up a Job's status, upcoming Visits (visitId, date and Time Window; use visitId to reschedule or cancel), assigned Engineer's first name and any Parts Orders with their Parts Status. Only works after verify_customer has succeeded in this conversation, and only for that Customer's Jobs.",
+    "Looks up a Job's status, Issue Type and postcode (use them for get_availability), upcoming Visits (visitId, date and Time Window; use visitId to reschedule or cancel), assigned Engineer's first name and any Parts Orders with their Parts Status. Only works after verify_customer has succeeded in this conversation, and only for that Customer's Jobs.",
   inputSchema: {
     type: "object",
     properties: {
@@ -38,8 +38,17 @@ export const getJobDetails: AgentTool = {
 
     const { db, sessionId } = ctx;
     const today = londonDateOf(ctx.now);
-    const job = await db.query<{ job_reference: string; issue_type: string; description: string; job_status: string }>(
-      `SELECT job_reference, issue_type, description, job_status FROM job WHERE session_id = $1 AND id = $2`,
+    const job = await db.query<{
+      job_reference: string;
+      issue_type: string;
+      description: string;
+      job_status: string;
+      postcode: string;
+    }>(
+      `SELECT j.job_reference, j.issue_type, j.description, j.job_status, c.postcode
+         FROM job j
+         JOIN customer c ON c.id = j.customer_id AND c.session_id = j.session_id
+        WHERE j.session_id = $1 AND j.id = $2`,
       [sessionId, jobId],
     );
     const visits = await db.query<{ id: string; date: string; time_window: string; engineer_name: string; upcoming: boolean }>(
@@ -68,6 +77,7 @@ export const getJobDetails: AgentTool = {
       result: {
         jobReference: j.job_reference,
         issueType: j.issue_type,
+        postcode: j.postcode,
         description: j.description,
         jobStatus: j.job_status,
         upcomingVisits: upcoming.map((v) => ({

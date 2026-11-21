@@ -20,7 +20,7 @@ export const proposeReschedule: AgentTool = {
     additionalProperties: false,
   },
   promptGuidance:
-    "To reschedule or cancel a Visit, verify the Customer, call get_job_details for the visitId, then (for a reschedule) get_availability for the Job's Issue Type and postcode. Call propose_reschedule or propose_cancellation, read back the change and call confirm_action only after the Customer agrees. If a result has outOfPolicy: true, the change was not made: tell the Customer the Apex team will contact them (a late-change fee may apply) and quote the ticketReference.",
+    "To reschedule or cancel a Visit, verify the Customer, call get_job_details for the visitId, then (for a reschedule) get_availability with the issueType and postcode from get_job_details (don't ask the Customer for them) and, if the Customer named a day, that day as fromDate. Once the Customer has named a free window, call propose_reschedule in the same turn. Call propose_reschedule or propose_cancellation, read back the change and call confirm_action only after the Customer agrees. If a result has outOfPolicy: true, the change was not made: tell the Customer the Apex team will contact them (a late-change fee may apply) and quote the ticketReference.",
   async run(input, ctx) {
     const check = await visitChangeableInChat(ctx, input.visitId, "reschedule");
     if (check.refused) return check.refused;
