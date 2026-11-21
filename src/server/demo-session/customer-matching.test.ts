@@ -94,7 +94,7 @@ describe("Booking with an email that is already on file", () => {
     const asAgentSeesIt = async (details: BookingDetails) => {
       const h = await chatHarness(WEDNESDAY_0930);
       const { proposal, confirmed } = await bookFirstWindow(h, details);
-      return [proposal, confirmed].map((r) => shape(r.ok ? r.result : r.error));
+      return [proposal.result, confirmed.result].map((r) => shape(r));
     };
 
     const brandNew = await asAgentSeesIt({ fullName: "Hannah Brooks", postcode: "SW4 7AB", email: "hannah.brooks@example.com" });
