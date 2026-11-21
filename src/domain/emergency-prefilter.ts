@@ -51,7 +51,7 @@ export function detectEmergency(text: string): EmergencyMatch {
 function normalise(text: string): string {
   return text
     .toLowerCase()
-    .replace(/[20182019`]/g, "'")
+    .replace(/[‘’`]/g, "'")
     .replace(/[.,!?;:()–—]+/g, ` ${BOUNDARY} `)
     .replace(/[^a-z0-9'| ]+/g, " ")
     .replace(/\s+/g, " ");

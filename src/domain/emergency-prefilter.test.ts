@@ -32,6 +32,7 @@ const CASES: Array<[text: string, expected: Expected]> = [
   ["it's not flooding, just a slow drip", "none"],
   ["the bathroom isn't flooded", "none"],
   ["I don't smell gas", "none"],
+  ["I don’t smell gas", "none"],
   ["not a gas leak, the pilot light keeps going out", "none"],
   // Near-misses
   ["I'd like a gas boiler service please", "none"],
