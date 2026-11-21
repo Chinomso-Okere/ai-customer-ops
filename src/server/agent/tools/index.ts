@@ -1,5 +1,6 @@
 import type { AgentTool } from "../types";
 import { checkCoverageArea } from "./check-coverage-area";
+import { getAvailability } from "./get-availability";
 import { refuseOffTopic } from "./refuse-off-topic";
 
 /**
@@ -10,4 +11,5 @@ import { refuseOffTopic } from "./refuse-off-topic";
 export const AGENT_TOOLS: readonly AgentTool[] = [
   checkCoverageArea,
   refuseOffTopic,
+  getAvailability,
 ];
