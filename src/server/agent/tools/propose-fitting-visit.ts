@@ -3,7 +3,7 @@ import { jobAwaitingFitting } from "@/server/scheduling/fitting-visit";
 import { getVerification, normaliseJobReference, verifiedJobId } from "@/server/verification";
 import { proposeAction } from "../confirmation";
 import type { FittingVisitPayload } from "../confirmation/fitting-visit";
-import type { AgentTool } from "../types";
+import { TOOL_ERRORS, type AgentTool } from "../types";
 
 /** First phase of booking a fitting Visit (#12): validates and records a pending action. */
 export const proposeFittingVisit: AgentTool = {
@@ -27,12 +27,8 @@ export const proposeFittingVisit: AgentTool = {
     const jobId = reference.trim() ? await verifiedJobId(ctx.db, ctx, reference) : null;
     if (!jobId) {
       const state = await getVerification(ctx.db, ctx);
-      return {
-        ok: false,
-        error: state.verifiedCustomerId
-          ? `${normaliseJobReference(reference)} is not one of the verified Customer's Jobs.`
-          : "The Customer is not verified in this conversation. Call verify_customer first.",
-      };
+      if (!state.verifiedCustomerId) return TOOL_ERRORS.notVerified;
+      return { ok: false, error: `${normaliseJobReference(reference)} is not one of the verified Customer's Jobs.` };
     }
     const job = await jobAwaitingFitting(ctx.db, ctx.sessionId, jobId);
     if (!job) {

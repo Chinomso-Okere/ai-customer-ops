@@ -2,7 +2,7 @@ import { describeWindow } from "@/server/scheduling/availability";
 import { changeNotice, findVisit, type ChangeableVisit } from "@/server/scheduling/visit-changes";
 import { getVerification, isVerifiedForJob } from "@/server/verification";
 import { outOfPolicyGuidance, raiseLateChangeTicket } from "./out-of-policy";
-import type { AgentTurnContext, ToolOutcome } from "./types";
+import { TOOL_ERRORS, type AgentTurnContext, type ToolOutcome } from "./types";
 
 export type VisitChange = "reschedule" | "cancellation";
 
@@ -19,7 +19,7 @@ export async function visitChangeableInChat(
 ): Promise<{ visit: ChangeableVisit; refused?: undefined } | { refused: ToolOutcome }> {
   const state = await getVerification(ctx.db, ctx);
   if (!state.verifiedCustomerId) {
-    return { refused: { ok: false, error: "The Customer is not verified in this conversation. Call verify_customer first." } };
+    return { refused: TOOL_ERRORS.notVerified };
   }
   const visit = typeof visitId === "string" ? await findVisit(ctx.db, ctx.sessionId, visitId.trim()) : undefined;
   if (!visit || !(await isVerifiedForJob(ctx.db, ctx, visit.jobReference))) {

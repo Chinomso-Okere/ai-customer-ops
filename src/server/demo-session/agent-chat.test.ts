@@ -7,6 +7,7 @@ import {
   MODEL_REFUSAL_REPLY,
   OFF_TOPIC_REFUSAL,
 } from "@/server/agent";
+import { PRICE_LIST } from "@/server/agent/price-list";
 import { ConversationNotFoundError, EmptyCustomerMessageError } from "@/server/demo-session";
 import { createHarness, london } from "@/server/testing/harness";
 import {
@@ -261,7 +262,11 @@ describe("Agent chat", () => {
       const { model } = await twoTurns();
       const system = JSON.stringify(model.requests[0]!.system);
       for (const figure of ["£95", "£89", "£75", "£120"]) expect(system).toContain(figure);
-      expect(system).toMatch(/heat pump survey: free/i);
+      // Every published entry, including the free heat pump survey (facts, not prompt wording).
+      for (const { item, price } of PRICE_LIST) {
+        expect(system).toContain(item);
+        expect(system).toContain(price);
+      }
     });
   });
 

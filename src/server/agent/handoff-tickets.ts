@@ -1,8 +1,10 @@
 import type { EmergencyKind } from "@/domain/emergency-prefilter";
 import { URGENCIES, type EscalationReason, type HandoffTicketStatus, type Urgency } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
+import { lockDemoSession } from "@/server/db/session-lock";
 import { handoffTicketReference, type HandoffTicketEvent } from "@/server/demo-session/dashboard-state";
 import { HandoffTicketNotFoundError, HandoffTicketStateError } from "@/server/demo-session/errors";
+import { enqueueSystemNote } from "./conversation-store";
 
 /** Escalation Reason → default (and minimum) Urgency. */
 export const DEFAULT_URGENCY: Readonly<Record<EscalationReason, Urgency>> = {
@@ -51,7 +53,7 @@ export async function raiseHandoffTicket(
   const { sessionId, conversationId, reason, now } = input;
   return db.transaction(async (tx) => {
     // Serialises ticket numbering (and the open-ticket check) within the Demo Session.
-    await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [sessionId]);
+    await lockDemoSession(tx, sessionId);
 
     const open = await tx.query<{ id: string; ticket_number: number; urgency: Urgency }>(
       `SELECT id, ticket_number, urgency FROM handoff_ticket
@@ -140,11 +142,19 @@ export async function changeHandoffTicketStatus(
   const transition = TRANSITIONS[input.action];
   if (!UUID.test(ticketId)) throw new HandoffTicketNotFoundError(ticketId);
   return db.transaction(async (tx) => {
-    const { rows } = await tx.query<{ status: HandoffTicketStatus }>(
-      "SELECT status FROM handoff_ticket WHERE session_id = $1 AND id = $2 FOR UPDATE",
+    const { rows } = await tx.query<{
+      status: HandoffTicketStatus;
+      conversation_id: string | null;
+      ticket_number: number;
+      escalation_reason: EscalationReason;
+      emergency_kind: EmergencyKind | null;
+    }>(
+      `SELECT status, conversation_id, ticket_number, escalation_reason, emergency_kind
+         FROM handoff_ticket WHERE session_id = $1 AND id = $2 FOR UPDATE`,
       [sessionId, ticketId],
     );
-    const current = rows[0]?.status;
+    const ticket = rows[0];
+    const current = ticket?.status;
     if (!current) throw new HandoffTicketNotFoundError(ticketId);
     if (current === transition.to) return current;
     if (!transition.from.includes(current)) {
@@ -156,8 +166,23 @@ export async function changeHandoffTicketStatus(
       transition.to,
     ]);
     await addEvent(tx, sessionId, ticketId, transition.event, `${transition.to} by an Operator`, now);
+    if (transition.to === "Resolved" && ticket!.conversation_id && isGasEmergency(ticket!)) {
+      // The gas/CO booking block lifts now: tell the model mid-conversation, never via the system prompt.
+      const reference = handoffTicketReference(ticket!.ticket_number);
+      await enqueueSystemNote(
+        tx,
+        { sessionId, conversationId: ticket!.conversation_id },
+        `Operator update: Emergency ticket ${reference} (possible gas leak or carbon monoxide) has been resolved by an Operator. The booking block in this conversation is lifted: you may help the Customer book, reschedule or cancel again if they ask.`,
+        now,
+      );
+    }
     return transition.to;
   });
+}
+
+/** As in `openEmergency`: an Emergency ticket with no recorded kind counts as gas/CO (fail safe). */
+function isGasEmergency(ticket: { escalation_reason: EscalationReason; emergency_kind: EmergencyKind | null }): boolean {
+  return ticket.escalation_reason === "Emergency" && (ticket.emergency_kind ?? "gas_or_co") === "gas_or_co";
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

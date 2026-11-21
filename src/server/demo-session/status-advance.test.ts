@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InvalidStatusAdvanceError } from "@/server/demo-session";
 import { createHarness, london } from "@/server/testing/harness";
+import { reply, text } from "@/server/testing/scripted-model-client";
 import { chatHarness, toolTurn, type ChatHarness } from "@/server/testing/tool-turns";
 
 // 2026-11-18 is a Wednesday (GMT).
@@ -219,8 +220,55 @@ describe("Booking the fitting Visit", () => {
       timeWindow: "AM",
     });
 
-    expect(proposal.ok).toBe(false);
-    if (proposal.ok) return;
-    expect(proposal.error).toMatch(/verify_customer/);
+    expect(proposal).toMatchObject({ ok: false, code: "not_verified" });
+  });
+});
+
+describe("Status advance → the Agent re-checks Job details", () => {
+  /** System messages the model was sent at the start of its latest Customer turn. */
+  function latestSystemNotes(h: ChatHarness): string {
+    const { messages } = h.model.requests.at(-1)!;
+    const i = messages.findLastIndex((m) => m.role === "user" && typeof m.content === "string");
+    return JSON.stringify(messages.slice(i + 1).filter((m) => (m.role as string) === "system"));
+  }
+
+  async function nextTurnNotes(h: ChatHarness): Promise<string> {
+    h.model.script(reply([text("(scripted Agent reply)")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "Any update?");
+    return latestSystemNotes(h);
+  }
+
+  it("advancing a Parts Order tells the verified Customer's conversation to call get_job_details for that Job", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { job, order } = await verifiedSarah(h);
+    expect(await nextTurnNotes(h)).not.toContain(job.jobReference);
+
+    await h.service.advancePartsStatus(h.sessionId, order.id, "Dispatched");
+
+    const notes = await nextTurnNotes(h);
+    expect(notes).toContain(job.jobReference);
+    expect(notes).toContain("get_job_details");
+  });
+
+  it("advancing a Job's status tells the verified Customer's conversation to re-check it", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { job } = await verifiedSarah(h);
+    await nextTurnNotes(h);
+
+    await h.service.advanceJobStatus(h.sessionId, job.id, "Awaiting Parts");
+
+    const notes = await nextTurnNotes(h);
+    expect(notes).toContain(job.jobReference);
+    expect(notes).toContain("get_job_details");
+  });
+
+  it("conversations not verified for that Customer are not told", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const { order, job } = await verifiedSarah(h);
+    const stranger: ChatHarness = { ...h, conversationId: await h.service.openConversation(h.sessionId, undefined) };
+
+    await h.service.advancePartsStatus(h.sessionId, order.id, "Dispatched");
+
+    expect(await nextTurnNotes(stranger)).not.toContain(job.jobReference);
   });
 });

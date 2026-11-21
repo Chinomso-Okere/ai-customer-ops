@@ -5,12 +5,23 @@ import type { Database } from "@/server/db/database";
 import { createPGliteDatabase } from "@/server/db/pglite";
 import { createDemoSessionService } from "@/server/demo-session";
 import type { ModelClient } from "@/server/model-client";
+import { loadMigratedSnapshot } from "./migrated-snapshot";
 import { ScriptedModelClient } from "./scripted-model-client";
 
-// Booting PGlite takes seconds, so one migrated database is shared per test
-// worker. Every test works in its own Demo Sessions, which are isolated by
-// design (ADR-0001), so sharing also exercises session scoping.
+// Booting PGlite takes seconds, so one database is shared per test file
+// (Vitest isolates modules per file). It starts from the snapshot that
+// global-setup.ts migrated once, so no file migrates inside a test's timeout.
+// Every test works in its own Demo Sessions, which are isolated by design
+// (ADR-0001), so sharing also exercises session scoping.
 let sharedDb: Promise<Database> | undefined;
+
+/** The shared database for this test file, booted on first use. */
+export function sharedTestDatabase(): Promise<Database> {
+  sharedDb ??= loadMigratedSnapshot().then((loadDataDir) =>
+    createPGliteDatabase({ loadDataDir }),
+  );
+  return sharedDb;
+}
 
 /**
  * Seam 1 harness: the real Demo Session service over a real in-process
@@ -26,8 +37,7 @@ export async function createHarness(options: {
   preModelHooks?: readonly PreModelHook[];
 }) {
   const clock = fixedClock(options.now);
-  sharedDb ??= createPGliteDatabase();
-  const db = await sharedDb;
+  const db = await sharedTestDatabase();
   const model = options.modelClient ?? new ScriptedModelClient();
   const service = createDemoSessionService({
     db,

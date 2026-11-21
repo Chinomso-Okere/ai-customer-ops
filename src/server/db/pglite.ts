@@ -23,10 +23,27 @@ function wrap(conn: PGliteLike, root: PGlite): Database {
   };
 }
 
-/** A fresh, migrated, in-memory Postgres. Used by tests and local dev. */
-export async function createPGliteDatabase(): Promise<Database> {
-  const pg = await PGlite.create();
+/**
+ * A migrated, in-memory Postgres. Used by tests and local dev. `loadDataDir`
+ * starts from a dumped data directory (tests boot from one migrated snapshot);
+ * migrations still run, and are a no-op when the snapshot is up to date.
+ */
+export async function createPGliteDatabase(
+  options: { loadDataDir?: Blob } = {},
+): Promise<Database> {
+  const pg = await PGlite.create(
+    options.loadDataDir ? { loadDataDir: options.loadDataDir } : undefined,
+  );
   const db = wrap(pg, pg);
   await migrate(db);
   return db;
+}
+
+/** Boots PGlite, runs every migration, and returns the data directory as a tarball. */
+export async function dumpMigratedPGliteDataDir(): Promise<Blob> {
+  const pg = await PGlite.create();
+  await migrate(wrap(pg, pg));
+  const dump = await pg.dumpDataDir("none");
+  await pg.close();
+  return dump;
 }

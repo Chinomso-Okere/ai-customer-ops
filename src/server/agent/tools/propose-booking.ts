@@ -3,7 +3,7 @@ import { ISSUE_TYPES, parseIssueType, type IssueType } from "@/domain/vocabulary
 import { describeWindow, parseWindow, requireAvailableWindow } from "@/server/scheduling/availability";
 import { proposeAction } from "../confirmation";
 import type { BookingPayload } from "../confirmation/booking";
-import type { AgentTool } from "../types";
+import { TOOL_ERRORS, type AgentTool, type ToolOutcome } from "../types";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -76,7 +76,7 @@ export const proposeBooking: AgentTool = {
  * Visit). `postcode` comes back in display form, e.g. "SW4 9ZZ".
  */
 export function parseBookingDetails(input: Record<string, unknown>):
-  | { ok: false; error: string }
+  | Extract<ToolOutcome, { ok: false }>
   | { ok: true; fullName: string; email: string; issueType: IssueType; postcode: string; phone: string | null; description: string } {
   const fullName = typeof input.fullName === "string" ? input.fullName.replace(/\s+/g, " ").trim() : "";
   if (!fullName) return { ok: false, error: "Ask the Customer for their full name." };
@@ -87,10 +87,7 @@ export function parseBookingDetails(input: Record<string, unknown>):
   const postcode = typeof input.postcode === "string" ? normalisePostcode(input.postcode) : "";
   if (postcode.length < 5) return { ok: false, error: "Ask the Customer for their full postcode." };
   if (!isInCoverageArea(postcode)) {
-    return {
-      ok: false,
-      error: `${outwardCode(postcode)} is outside the Apex Coverage Area, so it can't be booked. Politely tell the Customer Apex doesn't cover their postcode. This is not an Escalation.`,
-    };
+    return TOOL_ERRORS.outsideCoverageArea(outwardCode(postcode));
   }
   const phone = typeof input.phone === "string" && input.phone.trim() ? input.phone.trim() : null;
   const summary = typeof input.problemSummary === "string" ? input.problemSummary.trim() : "";

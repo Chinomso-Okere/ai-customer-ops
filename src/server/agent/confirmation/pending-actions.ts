@@ -125,8 +125,9 @@ export async function confirmAction(
       const outcome = await kind.execute(tx, ctx, action.payload);
       if (!outcome.ok) throw new RolledBack(outcome);
       await tx.query(
-        `UPDATE pending_action SET status = 'Confirmed', result = $2, resolved_at = $3 WHERE id = $1`,
-        [pendingActionId, JSON.stringify(outcome.result), ctx.now],
+        `UPDATE pending_action SET status = 'Confirmed', result = $4, resolved_at = $5
+          WHERE session_id = $1 AND conversation_id = $2 AND id = $3`,
+        [ctx.sessionId, ctx.conversationId, pendingActionId, JSON.stringify(outcome.result), ctx.now],
       );
       return outcome;
     });
@@ -134,9 +135,9 @@ export async function confirmAction(
     if (!(error instanceof RolledBack)) throw error;
     // The write failed (e.g. the window filled up meanwhile): this proposal is spent.
     await ctx.db.query(
-      `UPDATE pending_action SET status = 'Failed', resolved_at = $3
-        WHERE session_id = $1 AND id = $2 AND status = 'Pending'`,
-      [ctx.sessionId, pendingActionId, ctx.now],
+      `UPDATE pending_action SET status = 'Failed', resolved_at = $4
+        WHERE session_id = $1 AND conversation_id = $2 AND id = $3 AND status = 'Pending'`,
+      [ctx.sessionId, ctx.conversationId, pendingActionId, ctx.now],
     );
     return error.outcome;
   }

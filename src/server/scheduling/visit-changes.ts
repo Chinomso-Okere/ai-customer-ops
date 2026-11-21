@@ -2,8 +2,8 @@ import { londonDateOf } from "@/domain/london-time";
 import { timeWindowStart, type TimeWindow } from "@/domain/time-window";
 import { parseIssueType, type IssueType } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
+import { lockDemoSession } from "@/server/db/session-lock";
 import { checkWindowAvailable, type CandidateWindow } from "./availability";
-import { lockSessionSchedule } from "./booking";
 
 /**
  * A Visit can be rescheduled or cancelled in chat only if it starts more than
@@ -79,7 +79,7 @@ export async function moveVisit(
   window: CandidateWindow,
   now: Date,
 ): Promise<{ engineerName: string } | undefined> {
-  await lockSessionSchedule(tx, sessionId);
+  await lockDemoSession(tx, sessionId);
   const available = await checkWindowAvailable(tx, sessionId, visit.issueType, window, now);
   const engineerId = available?.freeEngineerIds[0];
   if (!engineerId) return undefined;
@@ -105,7 +105,7 @@ export async function cancelVisit(
   visit: ChangeableVisit,
   now: Date,
 ): Promise<{ jobStatus: string }> {
-  await lockSessionSchedule(tx, sessionId);
+  await lockDemoSession(tx, sessionId);
   await tx.query(`UPDATE visit SET cancelled_at = $3 WHERE session_id = $1 AND id = $2`, [sessionId, visit.visitId, now]);
   const { rows } = await tx.query<{ job_status: string; upcoming: number; part_arrived: boolean }>(
     `SELECT j.job_status,

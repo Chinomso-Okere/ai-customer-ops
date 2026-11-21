@@ -169,8 +169,7 @@ describe("Book a Visit: the server enforces the rules, not the model", () => {
 
   it("rejects a postcode outside the Coverage Area", async () => {
     const res = await propose({ postcode: "M1 1AE" });
-    expect(res.ok).toBe(false);
-    expect(res.content).toMatch(/Coverage Area/);
+    expect(res).toMatchObject({ ok: false, code: "outside_coverage_area" });
   });
 
   it("rejects a window starting in under 2 hours", async () => {

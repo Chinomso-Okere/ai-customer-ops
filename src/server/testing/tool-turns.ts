@@ -15,7 +15,20 @@ export async function chatHarness(now: Date) {
 /** What a domain tool sent back to the model. */
 export type ToolTurnResult =
   | { ok: true; result: any; content: string }
-  | { ok: false; error: string; content: string };
+  /** `code` is the structured error code, when the tool gave one: assert on it, never on `error` wording. */
+  | { ok: false; error: string; code?: string; content: string };
+
+function failure(content: string): ToolTurnResult {
+  try {
+    const parsed = JSON.parse(content) as { errorCode?: unknown; error?: unknown };
+    if (typeof parsed.errorCode === "string" && typeof parsed.error === "string") {
+      return { ok: false, error: parsed.error, code: parsed.errorCode, content };
+    }
+  } catch {
+    // a plain-text error
+  }
+  return { ok: false, error: content, content };
+}
 
 /** A tool input, or a function of the earlier results in the same turn. */
 export type ToolInput = Record<string, unknown> | ((previous: ToolTurnResult[]) => Record<string, unknown>);
@@ -48,7 +61,7 @@ export async function toolTurns(
   const collect = (request: Parameters<typeof lastToolResults>[0]) => {
     const [block] = lastToolResults(request);
     const content = typeof block!.content === "string" ? block!.content : JSON.stringify(block!.content);
-    results.push(block!.is_error ? { ok: false, error: content, content } : { ok: true, result: JSON.parse(content), content });
+    results.push(block!.is_error ? failure(content) : { ok: true, result: JSON.parse(content), content });
   };
   calls.forEach(([name, input], i) => {
     h.model.script((request) => {

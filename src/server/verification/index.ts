@@ -68,6 +68,15 @@ export function normaliseEmail(email: string): string {
   return email.replace(/\s+/g, "").toLowerCase();
 }
 
+/**
+ * SQL that is true when `column` holds the email in `param` (already passed
+ * through `normaliseEmail`): the same normalisation, in Postgres. Every email
+ * lookup (Verification, Customer matching) uses it so they agree.
+ */
+export function sqlEmailEquals(column: string, param: string): string {
+  return `lower(regexp_replace(${column}, '\\s', '', 'g')) = ${param}`;
+}
+
 /** "apx 10482" / "10482" → "APX-10482". */
 export function normaliseJobReference(reference: string): string {
   const compact = reference.replace(/\s+/g, "").toUpperCase();
@@ -152,7 +161,8 @@ export async function attemptVerification(
     await db.query(
       `INSERT INTO conversation_verification (conversation_id, session_id, verified_customer_id, updated_at)
        VALUES ($2, $1, $3, $4)
-       ON CONFLICT (conversation_id) DO UPDATE SET verified_customer_id = $3, updated_at = $4`,
+       ON CONFLICT (conversation_id) DO UPDATE SET verified_customer_id = $3, updated_at = $4
+         WHERE conversation_verification.session_id = $1`,
       [ref.sessionId, ref.conversationId, match.customerId, now],
     );
     return verified(db, ref.sessionId, match.customerId, match.jobReference, false);
@@ -163,6 +173,7 @@ export async function attemptVerification(
      VALUES ($2, $1, 1, $3)
      ON CONFLICT (conversation_id) DO UPDATE
        SET failed_attempts = conversation_verification.failed_attempts + 1, updated_at = $3
+       WHERE conversation_verification.session_id = $1
      RETURNING failed_attempts`,
     [ref.sessionId, ref.conversationId, now],
   );
@@ -218,7 +229,7 @@ async function matchPathB(
   const { rows } = await db.query<{ id: string; full_name: string; postcode: string; email: string }>(
     `SELECT id, full_name, postcode, email
        FROM customer
-      WHERE session_id = $1 AND lower(email) = $2
+      WHERE session_id = $1 AND ${sqlEmailEquals("email", "$2")}
       ORDER BY created_at, id`,
     [sessionId, normaliseEmail(email)],
   );
