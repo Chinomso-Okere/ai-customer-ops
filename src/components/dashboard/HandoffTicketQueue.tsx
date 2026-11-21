@@ -23,6 +23,7 @@ export function HandoffTicketQueue({ tickets }: { tickets: DashboardHandoffTicke
               <p className="ticket__meta">
                 {t.customer ? `${t.customer.fullName} · ${t.customer.postcode}` : "Unknown Customer"}
                 {t.jobReference ? ` · ${t.jobReference}` : ""}
+                {t.timeline.length > 1 ? ` · ${t.timeline.length - 1} follow-up message(s)` : ""}
               </p>
               <p className="ticket__next">
                 <strong>Next step:</strong> {t.recommendedNextStep}

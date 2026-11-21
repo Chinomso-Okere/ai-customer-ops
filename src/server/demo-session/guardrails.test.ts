@@ -42,6 +42,24 @@ describe("Guardrails", () => {
     expect(other.replies[0]!.kind).toBe("text");
   });
 
+  it("an Emergency past the message cap still gets the Safety Script and a Critical ticket", async () => {
+    const model = new ScriptedModelClient();
+    const { service } = await createHarness({ now: WEDNESDAY, modelClient: model });
+    const sessionId = await service.createDemoSession();
+    const conversationId = await service.openConversation(sessionId, undefined);
+    for (let i = 1; i <= MAX_CUSTOMER_MESSAGES_PER_DEMO_SESSION; i++) {
+      model.script(reply([text(`Reply ${i}`)]));
+      await service.sendCustomerMessage(sessionId, conversationId, `Message ${i}`);
+    }
+    expect((await service.sendCustomerMessage(sessionId, conversationId, "Hello?")).replies[0]!.kind).toBe(
+      "message_cap",
+    );
+
+    const emergency = await service.sendCustomerMessage(sessionId, conversationId, "I smell gas");
+    expect(emergency.replies.map((r) => r.kind)).toEqual(["safety_script", "handoff_notice"]);
+    expect(model.requests).toHaveLength(MAX_CUSTOMER_MESSAGES_PER_DEMO_SESSION);
+  });
+
   it("at most 3 new Demo Sessions per IP per hour; the 4th is refused until the hour has passed", async () => {
     const { service, clock } = await createHarness({ now: WEDNESDAY });
     const ip = "203.0.113.7";
@@ -80,6 +98,11 @@ describe("Guardrails", () => {
       return { sessionId, conversationId };
     };
     const expired = await withChat(); // created 11:30, expires 15:30
+    // An Emergency gives it a Handoff Ticket with a timeline (handoff_ticket_event) too.
+    await service.sendCustomerMessage(expired.sessionId, expired.conversationId, "I smell gas");
+    expect(Object.keys(await rowsScopedTo(db, expired.sessionId))).toEqual(
+      expect.arrayContaining(["handoff_ticket", "handoff_ticket_event"]),
+    );
     clock.set(london("2026-11-18T14:00"));
     const live = await withChat(); // created 14:00, expires 18:00
     const liveBefore = await service.getDashboardState(live.sessionId);
