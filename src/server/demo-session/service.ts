@@ -41,7 +41,7 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
     },
 
     async getDashboardState(sessionId) {
-      return readDashboardState(db, sessionId);
+      return readDashboardState(db, sessionId, clock.now());
     },
   };
 }

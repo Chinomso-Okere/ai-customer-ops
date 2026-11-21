@@ -1,4 +1,10 @@
-import type { PlainDate } from "@/domain/london-time";
+import {
+  addDays,
+  isWeekday,
+  londonDateOf,
+  mondayOf,
+  type PlainDate,
+} from "@/domain/london-time";
 import type { TimeWindow } from "@/domain/time-window";
 import type { IssueType, JobStatus } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
@@ -35,11 +41,33 @@ export interface DashboardJob {
   visits: DashboardVisit[];
 }
 
+export interface CalendarDay {
+  date: PlainDate;
+  isToday: boolean;
+}
+
+/** A Visit as placed on the calendar grid (Engineer × day × Time Window). */
+export interface CalendarVisit {
+  visitId: string;
+  date: PlainDate;
+  timeWindow: TimeWindow;
+  engineerId: string;
+  jobReference: string;
+  issueType: IssueType;
+  jobStatus: JobStatus;
+  customerName: string;
+  postcode: string;
+  isEmergencyVisit: boolean;
+}
+
 /** Everything the Operations Dashboard shows for one Demo Session. JSON-safe. */
 export interface DashboardState {
   sessionId: string;
   calendar: {
+    /** The weekdays of this week and next (from the coming Monday at a weekend). */
+    days: CalendarDay[];
     engineers: DashboardEngineer[];
+    visits: CalendarVisit[];
   };
   /** Newest Job Reference first. */
   jobs: DashboardJob[];
@@ -48,6 +76,7 @@ export interface DashboardState {
 export async function readDashboardState(
   db: Database,
   sessionId: string,
+  now: Date,
 ): Promise<DashboardState> {
   const engineers = await db.query<DashboardEngineer>(
     "SELECT id, name, skills FROM engineer WHERE session_id = $1 ORDER BY sort_order",
@@ -104,18 +133,47 @@ export async function readDashboardState(
     visitsByJob.set(v.job_id, list);
   }
 
+  const dashboardJobs: DashboardJob[] = jobs.rows.map((r) => ({
+    id: r.id,
+    jobReference: r.job_reference,
+    issueType: r.issue_type,
+    description: r.description,
+    jobStatus: r.job_status,
+    createdAt: r.created_at.toISOString(),
+    customer: { fullName: r.full_name, postcode: r.postcode, email: r.email },
+    visits: visitsByJob.get(r.id) ?? [],
+  }));
+
+  const days = calendarDays(londonDateOf(now));
+  const shownDates = new Set(days.map((d) => d.date));
+  const calendarVisits: CalendarVisit[] = dashboardJobs.flatMap((job) =>
+    job.visits
+      .filter((v) => shownDates.has(v.date))
+      .map((v) => ({
+        visitId: v.id,
+        date: v.date,
+        timeWindow: v.timeWindow,
+        engineerId: v.engineer.id,
+        jobReference: job.jobReference,
+        issueType: job.issueType,
+        jobStatus: job.jobStatus,
+        customerName: job.customer.fullName,
+        postcode: job.customer.postcode,
+        isEmergencyVisit: v.isEmergencyVisit,
+      })),
+  );
+
   return {
     sessionId,
-    calendar: { engineers: engineers.rows },
-    jobs: jobs.rows.map((r) => ({
-      visits: visitsByJob.get(r.id) ?? [],
-      id: r.id,
-      jobReference: r.job_reference,
-      issueType: r.issue_type,
-      description: r.description,
-      jobStatus: r.job_status,
-      createdAt: r.created_at.toISOString(),
-      customer: { fullName: r.full_name, postcode: r.postcode, email: r.email },
-    })),
+    calendar: { days, engineers: engineers.rows, visits: calendarVisits },
+    jobs: dashboardJobs,
   };
+}
+
+function calendarDays(today: PlainDate): CalendarDay[] {
+  const monday = isWeekday(today) ? mondayOf(today) : addDays(mondayOf(today), 7);
+  return [0, 1, 2, 3, 4, 7, 8, 9, 10, 11].map((offset) => {
+    const date = addDays(monday, offset);
+    return { date, isToday: date === today };
+  });
 }

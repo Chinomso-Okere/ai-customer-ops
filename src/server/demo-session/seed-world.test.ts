@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isInCoverageArea, outwardCode } from "@/domain/coverage-area";
-import { addDays, isWeekday, londonDateOf } from "@/domain/london-time";
+import { addDays, addWeekdays, isWeekday, londonDateOf } from "@/domain/london-time";
 import { TIME_WINDOWS } from "@/domain/time-window";
 import { JOB_STATUSES } from "@/domain/vocabulary";
 import { createHarness, london } from "@/server/testing/harness";
@@ -83,6 +83,20 @@ describe("seed world", () => {
       expect(dates[0]! <= addDays(today, -21)).toBe(true);
       expect(dates.at(-1)! <= addDays(today, 14)).toBe(true);
       expect(dates.at(-1)! >= addDays(today, 10)).toBe(true);
+    });
+
+    it("Engineers' calendars for the next 10 weekdays are roughly half full", async () => {
+      const state = await seededState(now);
+      const upcoming = new Set(
+        Array.from({ length: 10 }, (_, i) => addWeekdays(londonDateOf(now), i + 1)),
+      );
+
+      const booked = state.jobs
+        .flatMap((job) => job.visits)
+        .filter((v) => upcoming.has(v.date)).length;
+      const capacity = upcoming.size * TIME_WINDOWS.length * state.calendar.engineers.length;
+      expect(booked / capacity).toBeGreaterThanOrEqual(0.35);
+      expect(booked / capacity).toBeLessThanOrEqual(0.65);
     });
   });
 });
