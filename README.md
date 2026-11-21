@@ -13,6 +13,7 @@ Operations Dashboard (right). Every visitor gets a private, freshly seeded
 | Typecheck | `npm run typecheck` |
 | Dev server (http://localhost:3000) | `npm run dev` |
 | Production build | `npm run build` |
+| Eval suite (real model, costs money) | `npm run eval` |
 
 Node 22+ is required. Without `DATABASE_URL`, the app uses an in-memory PGlite
 database, so local dev needs no Postgres (data resets when the server restarts).
@@ -38,6 +39,7 @@ src/
     model-client.ts    Injected model client (Claude Sonnet 5.5 adapter).
     runtime.ts         Wires the service for the running app.
     testing/           Seam 1 harness and the scripted fake model client.
+  evals/               Eval suite: real-model scenarios over Seam 1 (`npm run eval`).
   app/                 Next.js App Router: page + thin API routes.
   components/          Thin UI over the dashboard state.
 ```
@@ -120,3 +122,42 @@ allows only daily cron jobs. On Pro you can change the schedule to hourly
 2. Set `DEMO_SESSION_IP_SALT` to another long random string.
 3. Deploy. Check that Project → Settings → Cron Jobs lists the job, then click
    **Run** once and confirm the response is `{ "deleted": <n> }`.
+
+## Eval suite
+
+`npm run eval` runs about 20 scripted multi-turn Customer conversations
+(`src/evals/scenarios.ts`) through the Demo Session service with the **real**
+model (Claude Sonnet 5.5, via `AnthropicModelClient`). Each scenario gets a
+fresh Demo Session with a pinned clock (Wednesday 18 November 2026, 09:30
+London, unless the scenario sets its own) and checks **facts only**: which
+tools appear in the Agent Trace and with what outcome, and the resulting
+dashboard state (Jobs, Visits, Handoff Tickets, possible duplicates). It never
+checks reply wording. Every scenario also fails if the Agent errored (e.g. an
+API 400).
+
+- **Run it manually before a deploy**, not in CI: it calls the paid API.
+  `npm test` never runs it (its files are `*.eval.ts`, outside the default
+  `*.test.ts` pattern; the suite has its own `vitest.eval.config.ts`).
+- **Needs `ANTHROPIC_API_KEY`** in the shell or in `.env.local`. Without it the
+  command stops at once with a message and makes no calls.
+- **Cost:** about 120 model calls per full run (roughly 46 Customer turns),
+  most of the prompt served from the cache. Expect **about $1-2** per run at
+  Sonnet 5.5 list prices. The report ends with the actual token counts and an
+  estimated cost. A full run takes a few minutes (4 scenarios at a time).
+- **One scenario:** `npm run eval -- -t gas-leak` (Vitest name filter).
+- **Report:** one `PASS`/`FAIL` line per scenario. For each failure it lists
+  the facts that did not hold, what was observed, and the tool calls in order.
+  The model is not deterministic (temperature can't be set on this API
+  version), so rerun a failing scenario once before treating it as a
+  regression. If it fails again, file an issue.
+
+Adding a scenario: append to `SCENARIOS` with Customer `steps` (strings, or
+functions of the world, e.g. to quote a seeded Job Reference; `operator` steps
+act on the dashboard between turns) and `expect` facts built from
+`src/evals/facts.ts`. Give Customers' details up front and assert the end state,
+so any reasonable path the model takes passes. `src/evals/scenarios.test.ts`
+(part of `npm test`, scripted model) checks that every scenario fails against
+an Agent that does nothing, unless the server guarantees its facts (e.g. the
+gas-leak pre-filter). It also checks that each scenario passes against a
+scripted Agent doing the right thing. Add a played-Agent case there for each
+new scenario.

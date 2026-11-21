@@ -247,7 +247,7 @@ export function requireApiKey(env: Record<string, string | undefined>): string {
   if (!key) {
     throw new Error(
       "The eval suite calls the real Claude API and needs ANTHROPIC_API_KEY.\n" +
-        "Set it (e.g. in .env.local or your shell) and run `npm run eval` again. A full run costs roughly $1-3.",
+        "Set it (e.g. in .env.local or your shell) and run `npm run eval` again. A full run costs roughly $1-2.",
     );
   }
   return key;
