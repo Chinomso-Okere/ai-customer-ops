@@ -248,6 +248,15 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
         WHERE NOT is_emergency_visit AND cancelled_at IS NULL;
     `,
   },
+  {
+    id: "0009_t13_emergency_kind",
+    sql: `
+      -- Which Emergency an Emergency Handoff Ticket is for ('gas_or_co' or
+      -- 'flood_or_sparks'); gas/CO wins once reported. NULL for other reasons.
+      -- An open gas/CO ticket blocks booking in its conversation.
+      ALTER TABLE handoff_ticket ADD COLUMN emergency_kind text;
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.

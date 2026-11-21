@@ -349,4 +349,57 @@ describe("Capacity: no Availability within the 10-weekday horizon", () => {
     expect(tickets[0]).toMatchObject({ ticketReference: res.result.escalation.ticketReference, urgency: "Normal" });
     expect(tickets[0]!.summary).toMatch(/AC Repair & Install/);
   });
+
+  it("during a gas/CO Emergency get_availability is blocked and raises no capacity ticket", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    await fillAcHorizon(h);
+    const customer: ChatHarness = { ...h, conversationId: await h.service.openConversation(h.sessionId, undefined) };
+    await h.service.sendCustomerMessage(h.sessionId, customer.conversationId, "I can smell gas");
+
+    const res = await toolTurn(customer, "Can someone look at my AC?", "get_availability", {
+      issueType: AC_CUSTOMER.issueType,
+      postcode: AC_CUSTOMER.postcode,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(await outOfPolicyTickets(customer)).toEqual([]);
+  });
+});
+
+describe("Reschedule and cancel during a gas/CO Emergency", () => {
+  it("a Customer can still cancel a Visit, but a reschedule is refused", async () => {
+    const { h, jobReference, visit } = await bookedAndVerified();
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "I can smell gas in the hall");
+
+    const reschedule = await toolTurn(h, "Can we move it to Monday?", "propose_reschedule", {
+      visitId: visit.visitId,
+      date: "2026-11-23",
+      timeWindow: "PM",
+    });
+    expect(reschedule.ok).toBe(false);
+
+    const proposal = await toolTurn(h, "Actually, just cancel it", "propose_cancellation", { visitId: visit.visitId });
+    expect(proposal.ok).toBe(true);
+    if (!proposal.ok) return;
+    const confirmed = await toolTurn(h, "yes cancel it", "confirm_action", { pendingActionId: proposal.result.pendingActionId });
+
+    expect(confirmed.ok && confirmed.result).toMatchObject({ cancelled: true, jobStatus: "Cancelled" });
+    expect((await jobOnDashboard(h, jobReference)).job.jobStatus).toBe("Cancelled");
+  });
+
+  it("a reschedule proposed before the gas Emergency can't be confirmed while it is unresolved", async () => {
+    const { h, jobReference, visit } = await bookedAndVerified();
+    const proposal = await toolTurn(h, "Move it to Monday afternoon", "propose_reschedule", {
+      visitId: visit.visitId,
+      date: "2026-11-23",
+      timeWindow: "PM",
+    });
+    if (!proposal.ok) throw new Error(proposal.error);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "the CO alarm is going off");
+
+    const confirmed = await toolTurn(h, "yes move it", "confirm_action", { pendingActionId: proposal.result.pendingActionId });
+
+    expect(confirmed.ok).toBe(false);
+    expect((await jobOnDashboard(h, jobReference)).job.visits[0]).toMatchObject({ date: FRIDAY_AM.date });
+  });
 });

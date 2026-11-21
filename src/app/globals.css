@@ -148,7 +148,7 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); }
 .visit--radiators-heating { background: #9c36b5; }
 .visit--ac-repair-install { background: #1971c2; }
 .visit--heat-pump { background: #2b8a3e; }
-.visit--emergency { background: var(--critical); outline: 2px solid #ffa8a8; }
+.visit--emergency { background: var(--critical); outline: 2px solid #ffa8a8; font-weight: 700; }
 
 /* Handoff Tickets */
 .tickets { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }

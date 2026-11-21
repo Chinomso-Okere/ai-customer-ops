@@ -85,6 +85,26 @@ export async function bookJob(
   const available = await checkWindowAvailable(tx, sessionId, booking.issueType, booking.window, booking.now);
   if (!available) return undefined;
 
+  const { customerId, jobId, jobReference } = await createCustomerJob(tx, sessionId, booking);
+  const visit = await createVisit(tx, sessionId, {
+    jobId,
+    issueType: booking.issueType,
+    window: booking.window,
+    now: booking.now,
+  });
+  if (!visit) throw new Error("bookJob: Availability vanished inside the schedule lock");
+  return { jobId, jobReference, customerId, visit };
+}
+
+/**
+ * Creates a Scheduled Job (no Visit yet) under the matching Customer or a new
+ * one (see `matchCustomer`). Call inside a transaction.
+ */
+export async function createCustomerJob(
+  tx: Database,
+  sessionId: string,
+  booking: { customer: NewCustomer; issueType: IssueType; description: string; now: Date },
+): Promise<{ customerId: string; jobId: string; jobReference: string }> {
   const { customer } = booking;
   const match = await matchCustomer(tx, sessionId, customer);
   const customerId =
@@ -112,12 +132,5 @@ export async function bookJob(
     [sessionId, jobReference, customerId, booking.issueType, booking.description, booking.now],
   );
   const jobId = jobRow.rows[0]!.id;
-  const visit = await createVisit(tx, sessionId, {
-    jobId,
-    issueType: booking.issueType,
-    window: booking.window,
-    now: booking.now,
-  });
-  if (!visit) throw new Error("bookJob: Availability vanished inside the schedule lock");
-  return { jobId, jobReference, customerId, visit };
+  return { customerId, jobId, jobReference };
 }

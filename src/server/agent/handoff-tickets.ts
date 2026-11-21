@@ -1,3 +1,4 @@
+import type { EmergencyKind } from "@/domain/emergency-prefilter";
 import { URGENCIES, type EscalationReason, type HandoffTicketStatus, type Urgency } from "@/domain/vocabulary";
 import type { Database } from "@/server/db/database";
 import { handoffTicketReference, type HandoffTicketEvent } from "@/server/demo-session/dashboard-state";
@@ -23,6 +24,8 @@ export interface RaiseHandoffTicketInput {
   jobId?: string | null;
   /** What this escalation adds to the ticket's timeline, e.g. the Customer's words. */
   timelineEntry: string;
+  /** For an Emergency: which kind. Gas/CO, once reported, sticks to the ticket. */
+  emergencyKind?: EmergencyKind;
   now: Date;
 }
 
@@ -64,9 +67,10 @@ export async function raiseHandoffTicket(
         `UPDATE handoff_ticket
             SET urgency = $3,
                 customer_id = COALESCE(customer_id, $4),
-                job_id = COALESCE(job_id, $5)
+                job_id = COALESCE(job_id, $5),
+                emergency_kind = CASE WHEN $6::text = 'gas_or_co' THEN $6 ELSE COALESCE(emergency_kind, $6) END
           WHERE session_id = $1 AND id = $2`,
-        [sessionId, existing.id, urgency, input.customerId ?? null, input.jobId ?? null],
+        [sessionId, existing.id, urgency, input.customerId ?? null, input.jobId ?? null, input.emergencyKind ?? null],
       );
       await addEvent(tx, sessionId, existing.id, "appended", input.timelineEntry, now);
       return {
@@ -79,8 +83,9 @@ export async function raiseHandoffTicket(
 
     const created = await tx.query<{ id: string; ticket_number: number }>(
       `INSERT INTO handoff_ticket (session_id, conversation_id, ticket_number, customer_id, job_id,
-                                   escalation_reason, urgency, status, summary, recommended_next_step, created_at)
-       SELECT $1, $2, COALESCE(MAX(ticket_number), 0) + 1, $3, $4, $5, $6, 'Open', $7, $8, $9
+                                   escalation_reason, urgency, status, summary, recommended_next_step, created_at,
+                                   emergency_kind)
+       SELECT $1, $2, COALESCE(MAX(ticket_number), 0) + 1, $3, $4, $5, $6, 'Open', $7, $8, $9, $10
          FROM handoff_ticket WHERE session_id = $1
        RETURNING id, ticket_number`,
       [
@@ -93,6 +98,7 @@ export async function raiseHandoffTicket(
         input.summary,
         input.recommendedNextStep,
         now,
+        input.emergencyKind ?? null,
       ],
     );
     const ticket = created.rows[0]!;

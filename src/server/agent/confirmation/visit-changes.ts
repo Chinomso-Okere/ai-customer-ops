@@ -56,6 +56,8 @@ export const rescheduleAction: PendingActionKind<ReschedulePayload> = {
 /** Cancels a Visit; the Job becomes Cancelled if it has no upcoming Visits left. */
 export const cancellationAction: PendingActionKind<CancellationPayload> = {
   kind: "cancellation",
+  // Books nothing, so a Customer can still cancel during a gas/CO Emergency.
+  allowedDuringGasEmergency: true,
   async execute(tx, ctx, p) {
     const visit = await findVisit(tx, ctx.sessionId, p.visitId);
     if (!visit) return GONE;

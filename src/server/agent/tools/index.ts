@@ -1,9 +1,11 @@
+import { blockedDuringGasEmergency } from "../emergency";
 import type { AgentTool } from "../types";
 import { checkCoverageArea } from "./check-coverage-area";
 import { confirmActionTool } from "./confirm-action";
 import { createHandoffTicket } from "./create-handoff-ticket";
 import { getAvailability } from "./get-availability";
 import { proposeBooking } from "./propose-booking";
+import { proposeEmergencyVisit } from "./propose-emergency-visit";
 import { proposeFittingVisit } from "./propose-fitting-visit";
 import { proposeCancellation } from "./propose-cancellation";
 import { proposeReschedule } from "./propose-reschedule";
@@ -19,13 +21,15 @@ import { verifyCustomer } from "./verify-customer";
 export const AGENT_TOOLS: readonly AgentTool[] = [
   checkCoverageArea,
   refuseOffTopic,
-  getAvailability,
-  proposeBooking,
+  // Booking tools refuse during an unresolved gas/CO Emergency (#13).
+  blockedDuringGasEmergency(getAvailability),
+  blockedDuringGasEmergency(proposeBooking),
   confirmActionTool,
   verifyCustomer,
   getJobDetails,
   createHandoffTicket,
-  proposeFittingVisit,
-  proposeReschedule,
+  blockedDuringGasEmergency(proposeFittingVisit),
+  blockedDuringGasEmergency(proposeReschedule),
   proposeCancellation,
+  blockedDuringGasEmergency(proposeEmergencyVisit),
 ];
