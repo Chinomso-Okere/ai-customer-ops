@@ -1,6 +1,8 @@
 import type { AgentTool } from "../types";
 import { checkCoverageArea } from "./check-coverage-area";
 import { refuseOffTopic } from "./refuse-off-topic";
+import { getJobDetails } from "./get-job-details";
+import { verifyCustomer } from "./verify-customer";
 
 /**
  * The tool registry: every domain tool the Agent can call. One tool per file in
@@ -10,4 +12,6 @@ import { refuseOffTopic } from "./refuse-off-topic";
 export const AGENT_TOOLS: readonly AgentTool[] = [
   checkCoverageArea,
   refuseOffTopic,
+  verifyCustomer,
+  getJobDetails,
 ];
