@@ -80,7 +80,7 @@ export function DemoApp() {
       </header>
       <main className="demo-split">
         <section className="demo-split__pane demo-split__pane--site" aria-label="Apex website">
-          <ApexWebsite />
+          <ApexWebsite sessionId={state?.sessionId ?? null} />
         </section>
         <section className="demo-split__pane demo-split__pane--ops" aria-label="Operations Dashboard">
           {error && <p className="banner banner--error">{error}</p>}

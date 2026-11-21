@@ -9,7 +9,7 @@ const SERVICES = [
 ];
 
 /** The fake Apex Heating & Cooling website the Customer chats from. */
-export function ApexWebsite() {
+export function ApexWebsite({ sessionId }: { sessionId: string | null }) {
   return (
     <div className="site">
       <div className="site__hero">
@@ -31,7 +31,7 @@ export function ApexWebsite() {
         Apex Heating &amp; Cooling is fictional and exists only for this demo. Any resemblance to a
         real company is coincidental.
       </p>
-      <ChatWidget />
+      <ChatWidget sessionId={sessionId} />
     </div>
   );
 }

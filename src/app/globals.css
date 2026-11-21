@@ -59,9 +59,23 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); }
 /* Chat widget */
 .chat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; min-height: 320px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06); }
 .chat__header { background: var(--brand); color: var(--brand-ink); font-weight: 700; padding: 10px 12px; border-radius: 10px 10px 0 0; }
-.chat__messages { flex: 1; padding: 12px; }
+.chat__messages { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; }
 .chat__composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border); }
-.chat__input { flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.chat__input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.bubble { margin: 0; padding: 8px 10px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble--customer { align-self: flex-end; background: var(--brand); color: var(--brand-ink); border-bottom-right-radius: 2px; }
+.bubble--agent { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
+.bubble--off_topic_refusal, .bubble--model_refusal { font-style: italic; }
+.bubble--agent_error { background: #ffe3e3; color: var(--critical); border-color: #ffc9c9; }
+
+/* Agent Trace */
+.trace { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.trace__entry { border: 1px solid var(--border); border-left: 4px solid var(--normal); border-radius: 6px; padding: 6px 8px; }
+.trace__entry--error { border-left-color: var(--critical); }
+.trace__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.trace__tool { font-weight: 700; font-size: 13px; }
+.trace__age { margin-left: auto; font-size: 12px; }
+.trace__io { margin: 4px 0 0; font-family: var(--mono); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border-radius: 4px; padding: 4px 6px; max-height: 160px; overflow: auto; }
 
 /* Operations Dashboard */
 .ops { display: flex; flex-direction: column; gap: 16px; }
