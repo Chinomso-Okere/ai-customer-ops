@@ -28,7 +28,7 @@ export const proposeBooking: AgentTool = {
     additionalProperties: false,
   },
   promptGuidance:
-    "To Book: collect full name, postcode, Issue Type and email (phone optional), call get_availability and offer its windows (never invent dates), then call propose_booking with the chosen window. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm before calling confirm_action.",
+    "To Book: collect full name, postcode, Issue Type and email (phone optional), call get_availability and offer its windows (never invent dates), then call propose_booking with the chosen window. If the Customer has already named a day or window, call get_availability with that day as fromDate; if their window is free, call propose_booking for it in the same turn rather than asking them to choose again. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm before calling confirm_action.",
   async run(input, ctx) {
     const details = parseBookingDetails(input);
     if (!details.ok) return details;

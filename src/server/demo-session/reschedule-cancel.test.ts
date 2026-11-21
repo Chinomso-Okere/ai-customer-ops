@@ -46,6 +46,20 @@ async function jobOnDashboard(h: ChatHarness, jobReference: string) {
 }
 
 describe("Reschedule a Visit more than 24h away", () => {
+  it("a Customer verified by Job Reference and email (no postcode) can reschedule: get_job_details gives the postcode Availability needs", async () => {
+    const { h: booked, jobReference } = await bookedAndVerified();
+    const h: ChatHarness = { ...booked, conversationId: await booked.service.openConversation(booked.sessionId, undefined) };
+    await toolTurn(h, `Move my service please, ${jobReference}, ${CUSTOMER.email}`, "verify_customer", { jobReference, email: CUSTOMER.email });
+
+    const [details, availability] = await toolTurns(h, "Wednesday 25th, afternoon?", [
+      ["get_job_details", { jobReference }],
+      ["get_availability", (r) => (r[0]!.ok ? { issueType: r[0]!.result.issueType, postcode: r[0]!.result.postcode, fromDate: "2026-11-25" } : {})],
+    ]);
+
+    expect(details).toMatchObject({ ok: true, result: { postcode: CUSTOMER.postcode } });
+    expect(availability).toMatchObject({ ok: true, result: { windows: [{ date: "2026-11-25", timeWindow: "AM" }, { date: "2026-11-25", timeWindow: "PM" }, {}] } });
+  });
+
   it("proposes with a read-back, then moves the existing Visit on confirm (no new Job)", async () => {
     const { h, jobReference, visit } = await bookedAndVerified();
     expect(visit).toMatchObject({ visitId: expect.any(String), ...FRIDAY_AM });

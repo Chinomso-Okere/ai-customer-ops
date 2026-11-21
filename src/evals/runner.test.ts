@@ -66,6 +66,9 @@ describe("Eval scenario runner (Seam 1, scripted model)", () => {
     expect(report).toMatch(/FAIL\s+mini-booking/);
     expect(report).toContain("propose_booking was called");
     expect(report).toContain("1 failed");
+    // The transcript of a failed scenario helps diagnose it (it is never asserted on).
+    expect(report).toContain("Customer: Yes, go ahead.");
+    expect(report).toContain("Agent: Sure, let me know if there's anything else.");
   });
 
   it("fails any scenario in which the Agent errored (e.g. the API rejected a request)", async () => {

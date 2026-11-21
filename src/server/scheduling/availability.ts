@@ -55,10 +55,12 @@ export async function findAvailability(
   sessionId: string,
   issueType: IssueType,
   now: Date,
-  options: { limit?: number; only?: CandidateWindow } = {},
+  options: { limit?: number; only?: CandidateWindow; fromDate?: PlainDate } = {},
 ): Promise<AvailableWindow[]> {
   const candidates = bookableWindows(now).filter(
-    (w) => !options.only || (w.date === options.only.date && w.timeWindow === options.only.timeWindow),
+    (w) =>
+      (!options.only || (w.date === options.only.date && w.timeWindow === options.only.timeWindow)) &&
+      (!options.fromDate || w.date >= options.fromDate),
   );
   if (candidates.length === 0) return [];
 

@@ -35,6 +35,16 @@ const MAX_TOKENS = 4096;
 export const MAX_MODEL_CALLS_PER_TURN = 8;
 
 /**
+ * The same tool call (name and input) failing the same way this many times in
+ * one turn ends the turn: the model is stuck, so stop before the call budget
+ * runs out. The failure before that one tells the model not to repeat it.
+ */
+export const MAX_IDENTICAL_FAILED_CALLS_PER_TURN = 3;
+
+const REPEATED_CALL_NOTICE =
+  "You already made this exact call in this turn and it failed the same way. Do not repeat it: reply to the Customer (e.g. ask for what is missing) instead.";
+
+/**
  * The Agent runner: a self-hosted manual tool loop on the Messages API.
  * One call runs one Customer turn: pre-model hooks, then model calls and tool
  * runs until the model stops calling tools.
@@ -53,7 +63,8 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
   async function runTool(
     use: BetaToolUseBlock,
     ctx: AgentTurnContext,
-  ): Promise<{ block: BetaToolResultBlockParam; endTurn?: AgentReplyDraft }> {
+    failures: Map<string, number>,
+  ): Promise<{ block: BetaToolResultBlockParam; endTurn?: AgentReplyDraft; stuck?: true }> {
     const tool = toolsByName.get(use.name);
     const input = isRecord(use.input) ? use.input : {};
     let outcome: ToolOutcome;
@@ -64,6 +75,14 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
     } catch (error) {
       console.error(`Agent tool ${use.name} failed`, error);
       outcome = { ok: false, error: "The tool failed unexpectedly. Apologise and offer to pass this to the team." };
+    }
+    let stuck = false;
+    if (!outcome.ok) {
+      const key = `${use.name}\n${canonicalJson(input)}\n${outcome.code ?? ""}\n${outcome.error}`;
+      const count = (failures.get(key) ?? 0) + 1;
+      failures.set(key, count);
+      if (count >= 2) outcome = { ok: false, code: "repeated_failed_call", error: `${outcome.error} ${REPEATED_CALL_NOTICE}` };
+      stuck = count >= MAX_IDENTICAL_FAILED_CALLS_PER_TURN;
     }
     const content = outcome.ok
       ? JSON.stringify(outcome.result)
@@ -85,6 +104,7 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
         ...(outcome.ok ? {} : { is_error: true }),
       },
       ...(outcome.ok && outcome.endTurn ? { endTurn: outcome.endTurn } : {}),
+      ...(stuck ? { stuck: true as const } : {}),
     };
   }
 
@@ -99,6 +119,7 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
     ctx: AgentTurnContext,
   ): Promise<AgentReplyDraft[]> {
     const texts: string[] = [];
+    const failures = new Map<string, number>();
     let calls = 0;
     const call = async (maxTokens?: number) => {
       if (++calls > MAX_MODEL_CALLS_PER_TURN) throw new Error("Agent turn exceeded the model call limit");
@@ -140,14 +161,24 @@ export function createAgentRunner(deps: AgentRunnerDeps) {
 
       const results: BetaToolResultBlockParam[] = [];
       let endTurn: AgentReplyDraft | undefined;
+      let stuck = false;
       // Sequential, so the trace and any propose -> confirm ordering are deterministic.
       for (const use of uses) {
-        const ran = await runTool(use, ctx);
+        const ran = await runTool(use, ctx, failures);
         results.push(ran.block);
         endTurn ??= ran.endTurn;
+        stuck ||= ran.stuck ?? false;
       }
       // All results for one assistant turn go back in ONE user message.
       turn.push({ role: "user", content: results });
+      if (stuck) {
+        await ctx.recordTrace({
+          kind: "error",
+          result: `Agent repeated a failing tool call ${MAX_IDENTICAL_FAILED_CALLS_PER_TURN} times; turn ended`,
+        });
+        turn.push(fixedAssistantTurn(AGENT_ERROR_REPLY));
+        return [{ kind: "agent_error", text: AGENT_ERROR_REPLY }];
+      }
       if (endTurn) {
         // A fixed reply replaces model text; record it as the Agent's turn so
         // the history shows what the Customer saw and stays valid.
@@ -265,6 +296,13 @@ function echoableContent(content: readonly BetaContentBlock[]): BetaContentBlock
   if (boundary < 0) return [...content];
   const dropBefore = new Set(["thinking", "redacted_thinking", "tool_use"]);
   return content.filter((b, i) => i >= boundary || !dropBefore.has(b.type));
+}
+
+/** JSON with object keys sorted, so the same input compares equal whatever its key order. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    isRecord(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v,
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

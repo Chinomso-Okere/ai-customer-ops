@@ -106,7 +106,11 @@ export type ToolOutcome =
     };
 
 /** Structured reasons a tool refused. */
-export type ToolErrorCode = "outside_coverage_area" | "not_verified";
+export type ToolErrorCode =
+  | "outside_coverage_area"
+  | "not_verified"
+  /** Set by the runner: this exact call already failed the same way in this turn. */
+  | "repeated_failed_call";
 
 /** Shared refusals, so every tool words and codes them the same way. */
 export const TOOL_ERRORS = {

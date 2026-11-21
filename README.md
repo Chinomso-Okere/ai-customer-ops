@@ -67,6 +67,12 @@ tool loop on Claude Sonnet 5.5 (`src/server/agent/runner.ts`).
   `run(input, ctx)` that validates and enforces policy and returns
   `{ ok: true, result }` or `{ ok: false, error }`), then add it to
   `tools/index.ts`. The runner records every call in the Agent Trace.
+  Strict tool use emits optional properties in schema order, so a tool whose
+  inputs vary by case (like `verify_customer`) should make every field
+  required and nullable (`type: ["string", "null"]`) rather than optional.
+- **Turn limits:** at most 8 model calls per Customer turn. If the same tool
+  call (name and input) fails the same way twice in a turn, the second result
+  tells the model not to repeat it; a third ends the turn with the apology.
 - **Tell the model about state** (e.g. an open Emergency ticket): call
   `ctx.enqueueSystemNote(text)` from a tool or hook. The note reaches the model
   as a mid-conversation system message right after the next Customer message.

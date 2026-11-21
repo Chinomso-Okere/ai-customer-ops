@@ -80,6 +80,8 @@ export interface ScenarioResult {
   facts: FactResult[];
   /** Tool names in the order the Agent called them. */
   toolCalls: string[];
+  /** "Customer: ..." / "Agent: ..." lines, for diagnosing a failure (never asserted on). */
+  transcript: string[];
   customerTurns: number;
   durationMs: number;
 }
@@ -126,6 +128,7 @@ export async function runScenario(
   };
 
   const facts: FactResult[] = [];
+  const transcript: string[] = [];
   let customerTurns = 0;
   try {
     for (const step of scenario.steps) {
@@ -134,9 +137,11 @@ export async function runScenario(
       } else {
         const text = typeof step.customer === "function" ? await step.customer(w) : step.customer;
         const before = w.trace.length;
+        transcript.push(`Customer: ${text}`);
         const { replies } = await service.sendCustomerMessage(sessionId, conversationId, text);
         customerTurns++;
         w.replies.push(...replies);
+        for (const r of replies) transcript.push(`Agent${r.kind === "text" ? "" : ` [${r.kind}]`}: ${r.text}`);
         await refresh();
         w.turns.push(w.trace.slice(before));
         continue;
@@ -158,6 +163,7 @@ export async function runScenario(
     passed: facts.every((f) => f.ok),
     facts,
     toolCalls: w.trace.filter((e) => e.kind === "tool_call").map((e) => e.toolName ?? "?"),
+    transcript,
     customerTurns,
     durationMs: Date.now() - started,
   };
@@ -227,6 +233,7 @@ export function formatReport(results: readonly ScenarioResult[], metered?: Meter
         if (f.observed) lines.push(`          observed: ${f.observed}`);
       }
       lines.push(`          tool calls: ${r.toolCalls.join(" -> ") || "(none)"}`);
+      lines.push("          transcript:", ...r.transcript.map((t) => `            ${t.replace(/\s*\n\s*/g, " / ")}`));
     }
   }
   const failed = results.filter((r) => !r.passed).length;

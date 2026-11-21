@@ -87,6 +87,33 @@ describe("Verification and Job lookup", () => {
     expect((await callTool(h, "get_job_details", { jobReference: sarah.jobReferences[0] })).isError).toBe(false);
   });
 
+  it("verify_customer asks the model for every detail in one call (string or null), so the strict grammar can't cut a Path B call short", async () => {
+    // Strict tool use emits optional properties in schema order: with optional
+    // fields, a call that starts with fullName (listed last) could hold nothing else.
+    const h = await chatHarness();
+    h.model.script(reply([text("Hi!")]));
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "Hello");
+
+    const tool = h.model.requests[0]!.tools!.find((t) => "name" in t && t.name === "verify_customer")!;
+    const schema = (tool as { input_schema: { properties: Record<string, { type: unknown }>; required: string[] } }).input_schema;
+    expect([...schema.required].sort()).toEqual(["email", "fullName", "jobReference", "postcode"]);
+    for (const field of schema.required) expect(schema.properties[field]!.type).toEqual(["string", "null"]);
+  });
+
+  it("Path B with the details the Customer didn't give sent as null verifies", async () => {
+    const h = await chatHarness();
+    const sarah = h.customer("Sarah Mitchell");
+
+    const verified = await callTool(h, "verify_customer", {
+      jobReference: null,
+      fullName: sarah.fullName,
+      postcode: sarah.postcode,
+      email: sarah.email,
+    });
+
+    expect(verified.json).toMatchObject({ verified: true, selectedJobReference: sarah.jobReferences[0] });
+  });
+
   it("an unnormalised postcode (no space, lower case) still matches", async () => {
     const h = await chatHarness();
     const sarah = h.customer("Sarah Mitchell");
