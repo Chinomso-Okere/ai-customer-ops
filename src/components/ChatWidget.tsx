@@ -59,6 +59,8 @@ export function ChatWidget({
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
+    // Clear the previous Demo Session's messages before loading the new one.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessages([]);
     openConversation()
       .then((m) => {
@@ -112,14 +114,16 @@ export function ChatWidget({
     if (!outgoing || outgoing.id === lastOutgoingId.current || !sessionId || pending) return;
     lastOutgoingId.current = outgoing.id;
     void sendText(outgoing.text);
-  }, [outgoing, sessionId, pending]); // sendText is recreated each render; deliberately not a dep
+    // sendText is recreated each render; deliberately not a dep
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outgoing, sessionId, pending]);
 
   return (
     <div className="chat" aria-label="Chat with Apex">
       <div className="chat__header">Chat with Apex</div>
       <div className="chat__messages" ref={scroller} aria-live="polite">
         {messages.length === 0 && !pending && (
-          <p className="muted">Ask about prices, check we cover your postcode, or tell us what's wrong.</p>
+          <p className="muted">Ask about prices, check we cover your postcode, or tell us what&apos;s wrong.</p>
         )}
         {messages.map((m) =>
           m.kind === "safety_script" && isSafetyScript(m.payload) ? (
