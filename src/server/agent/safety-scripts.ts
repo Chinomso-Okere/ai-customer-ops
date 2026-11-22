@@ -1,5 +1,8 @@
 import type { EmergencyKind } from "@/domain/emergency-prefilter";
 
+/** Starts the history note the Emergency pre-filter leaves; later turns (and the dev scripted model) detect it. */
+export const PREFILTER_HISTORY_NOTE_PREFIX = "Emergency pre-filter fired";
+
 /**
  * The fixed Safety Script per Emergency kind. Never model-generated (ADR-0002).
  * The chat widget renders `bullets` as short, high-contrast points.

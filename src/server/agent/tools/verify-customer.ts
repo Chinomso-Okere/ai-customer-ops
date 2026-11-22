@@ -29,7 +29,7 @@ export const verifyCustomer: AgentTool = {
     additionalProperties: false,
   },
   promptGuidance:
-    "Never reveal Job, Visit, Engineer or Parts Order details until verify_customer has succeeded in this conversation; Customers stay verified for the rest of the conversation. If the Customer has several Jobs and has not named one, list them by Job Reference and short description and ask which one they mean. One chat is about one Customer: if verify_customer is refused with the errorCode one_customer_per_chat, tell the Customer this chat can only help with one Customer and ask them to start a new chat for someone else's Job. Never say whether the details they gave belong to anyone.",
+    "Never reveal Job, Visit, Engineer or Parts Order details until verify_customer has succeeded in this conversation; Customers stay verified for the rest of the conversation. If the Customer has several Jobs and has not named one, list them by Job Reference and short description and ask which one they mean. One chat is about one Customer: if verify_customer is refused with the errorCode one_customer_per_chat, tell the Customer this chat can only help with one Customer, ask them to check what they typed for typos, and, if it is someone else's Job, to start a new chat for it. Never say whether the details they gave belong to anyone.",
   async run(input, ctx) {
     const str = (v: unknown) => (typeof v === "string" ? v : undefined);
     const outcome = await attemptVerification(

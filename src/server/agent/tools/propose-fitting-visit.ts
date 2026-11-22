@@ -2,7 +2,7 @@ import { describeWindow, parseWindow, requireAvailableWindow } from "@/server/sc
 import { jobAwaitingFitting } from "@/server/scheduling/fitting-visit";
 import { getVerification, normaliseJobReference, verifiedJobId } from "@/server/verification";
 import { proposeAction } from "../confirmation";
-import type { FittingVisitPayload } from "../confirmation/fitting-visit";
+import { fittingVisitAction, type FittingVisitPayload } from "../confirmation/fitting-visit";
 import { TOOL_ERRORS, type AgentTool } from "../types";
 
 /** First phase of booking a fitting Visit (#12): validates and records a pending action. */
@@ -50,15 +50,11 @@ export const proposeFittingVisit: AgentTool = {
       timeWindow: window.timeWindow,
       label: describeWindow(window),
     };
-    const pendingActionId = await proposeAction(ctx, { kind: "fitting_visit", payload, readBack });
-    return {
-      ok: true,
-      result: {
-        pendingActionId,
-        readBack,
-        guidance:
-          "Nothing is booked yet. Read back the fitting Visit's date and Time Window and ask the Customer to confirm. Call confirm_action only after they agree.",
-      },
-    };
+    return proposeAction(ctx, fittingVisitAction, {
+      payload,
+      readBack,
+      guidance:
+        "Nothing is booked yet. Read back the fitting Visit's date and Time Window and ask the Customer to confirm. Call confirm_action only after they agree.",
+    });
   },
 };

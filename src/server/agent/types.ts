@@ -111,7 +111,7 @@ export type ToolErrorCode =
   | "not_verified"
   /** The chat already has a Customer (#27) and these details are not theirs. */
   | "one_customer_per_chat"
-  /** A phone number that is not a UK number (see `normaliseUkPhone`). */
+  /** A phone number that is neither a UK number nor a "+" international one (see `normaliseCallbackPhone`). */
   | "invalid_phone"
   /** Set by the runner: this exact call already failed the same way in this turn. */
   | "repeated_failed_call";
@@ -132,7 +132,7 @@ export const TOOL_ERRORS = {
     ok: false,
     code: "one_customer_per_chat",
     error:
-      "Refused: this chat can only help with one Customer. Tell the Customer that, and ask them to start a new chat (the New chat button) to get help with anyone else's Job. Do not say whether the details they gave belong to anyone, and do not call this tool again with other people's details.",
+      "Refused: these details can't be used in this chat, which can only help with one Customer. Ask the Customer to check what they typed for typos. If it is someone else's Job, ask them to start a new chat (the New chat button) for it. Do not say whether the details they gave belong to anyone.",
   },
   outsideCoverageArea: (outwardCode: string) => ({
     ok: false as const,

@@ -203,6 +203,7 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
         await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [ipHash]);
       }
       if (replacing && UUID.test(replacing)) {
+        // `replacing` is the session root id from the caller's own cookie, never found by IP.
         await tx.query("DELETE FROM demo_session WHERE id = $1", [replacing]);
       }
       if (ipHash) {

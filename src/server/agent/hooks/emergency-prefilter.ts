@@ -1,8 +1,9 @@
+import { contactStillNeeded } from "@/domain/callback-contact";
 import { detectEmergency, type EmergencyKind } from "@/domain/emergency-prefilter";
 import { getVerification } from "@/server/verification";
 import { openEmergency } from "../emergency";
 import { raiseHandoffTicket } from "../handoff-tickets";
-import { SAFETY_SCRIPTS, safetyScriptText } from "../safety-scripts";
+import { PREFILTER_HISTORY_NOTE_PREFIX, SAFETY_SCRIPTS, safetyScriptText } from "../safety-scripts";
 import type { PreModelHook } from "../types";
 
 const LABELS: Record<EmergencyKind, string> = {
@@ -26,9 +27,9 @@ const contactNote = (ref: string) =>
 /** The mid-conversation system message telling the model what the open Emergency means for it. */
 const EMERGENCY_NOTES: Record<EmergencyKind, (ticketReference: string) => string> = {
   gas_or_co: (ref) =>
-    `Emergency (${LABELS.gas_or_co}): the Safety Script was shown and Critical Handoff Ticket ${ref} is open for this conversation. Apex doesn't fix gas leaks. Do not book, reschedule or offer any Visit in this conversation until an Operator resolves ${ref}: the booking tools will refuse. Keep pointing the Customer to the safety advice: leave the property and call National Gas Emergency on 0800 111 999, which comes before waiting for Apex. ${contactNote(ref)} If the Customer mentions it, quote ${ref}. You may still answer other questions.`,
+    `Emergency (${LABELS.gas_or_co}): the Safety Script was shown and Critical Handoff Ticket ${ref} is open for this conversation. Apex doesn't fix gas leaks. Do not book, reschedule or offer any Visit, in this chat or any other, until an Operator resolves ${ref}: the booking tools will refuse. Keep pointing the Customer to the safety advice: leave the property and call National Gas Emergency on 0800 111 999, which comes before waiting for Apex. ${contactNote(ref)} If the Customer mentions it, quote ${ref}. You may still answer other questions.`,
   flood_or_sparks: (ref) =>
-    `Emergency (${LABELS.flood_or_sparks}): the Safety Script was shown and Critical Handoff Ticket ${ref} is open for this conversation. Offer the Customer the earliest Emergency Visit: collect their full name, postcode, email, phone number and Issue Type, call propose_emergency_visit, read back its window and call confirm_action once they agree. An Emergency Visit may be booked even when normal Availability is full. ${contactNote(ref)} If the Customer mentions it, quote ${ref}.`,
+    `Emergency (${LABELS.flood_or_sparks}): the Safety Script was shown and Critical Handoff Ticket ${ref} is open for this conversation. Offer the Customer the earliest Emergency Visit: collect their full name, postcode, email and Issue Type (phone is optional for the Visit), call propose_emergency_visit, read back its window and call confirm_action once they agree. An Emergency Visit may be booked even when normal Availability is full. ${contactNote(ref)} If the Customer mentions it, quote ${ref}.`,
 };
 
 /**
@@ -76,7 +77,7 @@ export const emergencyPrefilter: PreModelHook = async (ctx) => {
     await ctx.enqueueSystemNote(EMERGENCY_NOTES[kindNow](ticket.ticketReference));
   }
 
-  const contactNeeded = !(ticket.contactName && ticket.contactPhone);
+  const contactNeeded = contactStillNeeded(ticket);
   const notice = emergencyNotice(kindNow, ticket, contactNeeded);
   return {
     replies: [
@@ -91,7 +92,7 @@ export const emergencyPrefilter: PreModelHook = async (ctx) => {
         payload: { ticketReference: ticket.ticketReference, isNewTicket: ticket.isNew, contactNeeded },
       },
     ],
-    historyNote: `[Emergency pre-filter fired on "${detected.phrase}": ${kind} Safety Script shown; Critical Handoff Ticket ${ticket.ticketReference} ${ticket.isNew ? "created" : "updated"}.]`,
+    historyNote: `[${PREFILTER_HISTORY_NOTE_PREFIX} on "${detected.phrase}": ${kind} Safety Script shown; Critical Handoff Ticket ${ticket.ticketReference} ${ticket.isNew ? "created" : "updated"}.]`,
   };
 };
 
@@ -106,16 +107,11 @@ function emergencyNotice(
   ticket: { ticketReference: string; isNew: boolean },
   contactNeeded: boolean,
 ): string {
-  const { ticketReference } = ticket;
-  if (!contactNeeded) {
-    return ticket.isNew
-      ? `I've raised an urgent ticket with our team: ${ticketReference}. They have your details and will call you.`
-      : `Your urgent ticket ${ticketReference} is already with our team, and I've added this message to it.`;
-  }
+  const opening = ticket.isNew
+    ? `I've alerted our team (reference ${ticket.ticketReference}).`
+    : `Your report ${ticket.ticketReference} is already with our team, and I've added this message to it.`;
+  if (!contactNeeded) return ticket.isNew ? `${opening} They have your details and will call you.` : opening;
   const ask = "Please reply with your name and a phone number so the Apex team can call you back. We'll call once we have a number.";
   const first = kind === "gas_or_co" ? "Follow the safety steps above first: don't wait for us. " : "";
-  const opening = ticket.isNew
-    ? `I've raised an urgent ticket with our team: ${ticketReference}.`
-    : `Your urgent ticket ${ticketReference} is already with our team, and I've added this message to it.`;
   return `${opening} ${first}${ask}`;
 }

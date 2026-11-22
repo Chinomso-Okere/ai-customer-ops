@@ -91,7 +91,7 @@ Proving a Customer's identity before the Agent reveals Job details: either Job R
 _Avoid_: Login, authentication
 
 **Chat's Customer**:
-The one Customer a conversation is about, set by the conversation's first successful Verification or Booking. After that the Agent only verifies, and only books for, that Customer; anyone else needs a New chat.
+The one Customer a conversation is about, set by the conversation's first successful Verification or Booking. After that the Agent only verifies, and only books for, that Customer; anyone else needs a New chat. An Emergency Visit is the exception: it is never refused for who it is for, and does not set the chat's Customer.
 _Avoid_: Session user, account
 
 **Escalation**:

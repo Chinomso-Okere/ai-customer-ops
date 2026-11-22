@@ -7,7 +7,8 @@
  *
  * Matching ignores case and whitespace; postcodes are compared with spaces
  * removed. No fuzzy name matching. 3 failed attempts lock Verification for the
- * conversation; once verified, the Customer stays verified for it.
+ * conversation, verified or not (a locked conversation loses its verified
+ * access too); otherwise a verified Customer stays verified for it.
  *
  * One chat is about one Customer (#27): the first successful Verification or
  * Booking in a conversation sets its Customer, and from then on only that
@@ -19,7 +20,9 @@
  * parts fitting) must gate on `isVerifiedForJob` / `getVerification`.
  */
 import { normalisePostcode } from "@/domain/coverage-area";
+import { normaliseEmail, normaliseName } from "@/domain/customer-identity";
 import type { JobStatus } from "@/domain/vocabulary";
+import { getChatCustomerId, setChatCustomerIfUnset } from "@/server/chat-customer";
 import type { Database } from "@/server/db/database";
 
 export const MAX_VERIFICATION_ATTEMPTS = 3;
@@ -71,15 +74,6 @@ export type VerificationOutcome =
   /** Neither path's details are complete; no attempt is used. */
   | { kind: "incomplete"; missing: string };
 
-/** "Sarah  MITCHELL " → "sarah mitchell". */
-export function normaliseName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-export function normaliseEmail(email: string): string {
-  return email.replace(/\s+/g, "").toLowerCase();
-}
-
 /**
  * SQL that is true when `column` holds the email in `param` (already passed
  * through `normaliseEmail`): the same normalisation, in Postgres. Every email
@@ -103,19 +97,20 @@ export async function getVerification(db: Database, ref: ConversationRef): Promi
       WHERE session_id = $1 AND conversation_id = $2`,
     [ref.sessionId, ref.conversationId],
   );
-  const verifiedCustomerId = rows[0]?.verified_customer_id ?? null;
   const failedAttempts = rows[0]?.failed_attempts ?? 0;
+  const locked = failedAttempts >= MAX_VERIFICATION_ATTEMPTS;
   return {
-    verifiedCustomerId,
+    // A locked conversation is verified for nobody.
+    verifiedCustomerId: locked ? null : (rows[0]?.verified_customer_id ?? null),
     failedAttempts,
     attemptsRemaining: Math.max(0, MAX_VERIFICATION_ATTEMPTS - failedAttempts),
-    locked: verifiedCustomerId === null && failedAttempts >= MAX_VERIFICATION_ATTEMPTS,
+    locked,
   };
 }
 
 /**
- * The Job's id if this conversation is verified for the Customer who owns it,
- * else null. `jobReference` may be in any case/spacing.
+ * The Job's id if this conversation is verified for the Customer who owns it
+ * (and not locked), else null. `jobReference` may be in any case/spacing.
  */
 export async function verifiedJobId(
   db: Database,
@@ -126,8 +121,9 @@ export async function verifiedJobId(
     `SELECT j.id
        FROM conversation_verification v
        JOIN job j ON j.session_id = v.session_id AND j.customer_id = v.verified_customer_id
-      WHERE v.session_id = $1 AND v.conversation_id = $2 AND j.job_reference = $3`,
-    [ref.sessionId, ref.conversationId, normaliseJobReference(jobReference)],
+      WHERE v.session_id = $1 AND v.conversation_id = $2 AND j.job_reference = $3
+        AND v.failed_attempts < $4`,
+    [ref.sessionId, ref.conversationId, normaliseJobReference(jobReference), MAX_VERIFICATION_ATTEMPTS],
   );
   return rows[0]?.id ?? null;
 }
@@ -140,47 +136,6 @@ export async function isVerifiedForJob(db: Database, ref: ConversationRef, jobRe
 /** Is this conversation verified for `customerId`? */
 export async function isVerifiedForCustomer(db: Database, ref: ConversationRef, customerId: string): Promise<boolean> {
   return (await getVerification(db, ref)).verifiedCustomerId === customerId;
-}
-
-/** The Customer this conversation is about, or null if it has none yet. */
-export async function getChatCustomerId(db: Database, ref: ConversationRef): Promise<string | null> {
-  const { rows } = await db.query<{ customer_id: string | null }>(
-    "SELECT customer_id FROM conversation WHERE session_id = $1 AND id = $2",
-    [ref.sessionId, ref.conversationId],
-  );
-  return rows[0]?.customer_id ?? null;
-}
-
-/** Makes `customerId` the chat's Customer unless the conversation already has one. */
-export async function setChatCustomerIfUnset(db: Database, ref: ConversationRef, customerId: string): Promise<void> {
-  await db.query(
-    "UPDATE conversation SET customer_id = $3 WHERE session_id = $1 AND id = $2 AND customer_id IS NULL",
-    [ref.sessionId, ref.conversationId, customerId],
-  );
-}
-
-/**
- * True when the conversation has a Customer and these Booking details name
- * someone else (a different full name or email, compared after normalising).
- */
-export async function isOtherThanChatCustomer(
-  db: Database,
-  ref: ConversationRef,
-  who: { fullName: string; email: string },
-): Promise<boolean> {
-  const { rows } = await db.query<{ full_name: string; email: string }>(
-    `SELECT c.full_name, c.email
-       FROM conversation v
-       JOIN customer c ON c.session_id = v.session_id AND c.id = v.customer_id
-      WHERE v.session_id = $1 AND v.id = $2`,
-    [ref.sessionId, ref.conversationId],
-  );
-  const chatCustomer = rows[0];
-  if (!chatCustomer) return false;
-  return (
-    normaliseName(chatCustomer.full_name) !== normaliseName(who.fullName) ||
-    normaliseEmail(chatCustomer.email) !== normaliseEmail(who.email)
-  );
 }
 
 /** Tries to verify the Customer, recording the attempt. */
@@ -239,8 +194,7 @@ export async function attemptVerification(
   return {
     kind: chatCustomerId ? "otherCustomer" : "failed",
     attemptsRemaining,
-    // A verified conversation never locks.
-    locked: !state.verifiedCustomerId && attemptsRemaining === 0,
+    locked: attemptsRemaining === 0,
   };
 }
 

@@ -36,14 +36,14 @@ describe("Emergency tickets collect the Customer's name and phone", () => {
     }
   });
 
-  it("the system note tells the model to collect the contact details and attach them to the ticket", async () => {
+  it("the model is sent one system note about the new Emergency ticket, to collect the contact details", async () => {
     const h = await chatHarness(WEDNESDAY_1130);
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "I smell gas");
     h.model.script(reply([text("(scripted Agent reply)")]));
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "what happens now?");
 
     // The note is queued by the pre-filter and delivered with the next model request.
-    expect(queuedNotes(h.model.requests.at(-1)!).some((n) => n.includes("create_handoff_ticket"))).toBe(true);
+    expect(queuedNotes(h.model.requests.at(-1)!)).toHaveLength(1);
   });
 
   it("the open ticket carries the contact once the Customer gives it, with an appended event", async () => {
@@ -85,6 +85,16 @@ describe("Emergency tickets collect the Customer's name and phone", () => {
 
     expect(result).toMatchObject({ ok: false, code: "invalid_phone" });
     expect(await emergencyTicket(h)).toMatchObject({ contactName: null, contactPhone: null });
+  });
+
+  it("an international number written with a leading + is accepted and stored in international form", async () => {
+    const h = await chatHarness(WEDNESDAY_1130);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "I smell gas");
+
+    const result = await attachContact(h, "I'm Hannah, +1 (415) 555-0132", { customerName: "Hannah Brooks", customerPhone: "+1 (415) 555-0132" });
+
+    expect(result.ok && result.result).toMatchObject({ contactStillNeeded: false });
+    expect(await emergencyTicket(h)).toMatchObject({ contactName: "Hannah Brooks", contactPhone: "+14155550132" });
   });
 
   it("works outside the Coverage Area: no postcode is needed and none is checked", async () => {

@@ -1,6 +1,7 @@
 import { normalisePostcode } from "@/domain/coverage-area";
 import type { Database } from "@/server/db/database";
-import { normaliseEmail, normaliseName, sqlEmailEquals } from "@/server/verification";
+import { normaliseEmail, normaliseName } from "@/domain/customer-identity";
+import { sqlEmailEquals } from "@/server/verification";
 
 export interface CustomerDetails {
   fullName: string;

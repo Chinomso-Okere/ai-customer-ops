@@ -30,18 +30,36 @@ export async function openEmergency(
 }
 
 /**
- * The gas/CO booking block, enforced server-side: while the conversation's
- * gas/CO Emergency ticket is unresolved, nothing may be booked. Returns the
- * refusal for the model, or undefined when booking is allowed.
+ * The Demo Session's open gas/CO Emergency ticket, from any conversation, if
+ * any. A pre-#13 ticket has no kind and counts as gas/CO (fail safe).
+ */
+async function openGasEmergencyInSession(
+  ctx: Pick<AgentTurnContext, "db" | "sessionId">,
+): Promise<{ ticketReference: string } | undefined> {
+  const { rows } = await ctx.db.query<{ ticket_number: number }>(
+    `SELECT ticket_number FROM handoff_ticket
+      WHERE session_id = $1 AND escalation_reason = 'Emergency' AND status <> 'Resolved'
+        AND (emergency_kind = 'gas_or_co' OR emergency_kind IS NULL)
+      ORDER BY ticket_number DESC LIMIT 1`,
+    [ctx.sessionId],
+  );
+  return rows[0] && { ticketReference: handoffTicketReference(rows[0].ticket_number) };
+}
+
+/**
+ * The gas/CO booking block, enforced server-side: while any gas/CO Emergency
+ * ticket in the Demo Session is unresolved, nothing may be booked, in any chat
+ * (so a New chat is no way round it). Returns the refusal for the model, or
+ * undefined when booking is allowed.
  */
 export async function gasEmergencyBookingBlock(
-  ctx: Pick<AgentTurnContext, "db" | "sessionId" | "conversationId">,
+  ctx: Pick<AgentTurnContext, "db" | "sessionId">,
 ): Promise<ToolOutcome | undefined> {
-  const emergency = await openEmergency(ctx);
-  if (emergency?.emergencyKind !== "gas_or_co") return undefined;
+  const emergency = await openGasEmergencyInSession(ctx);
+  if (!emergency) return undefined;
   return {
     ok: false,
-    error: `Refused: Emergency ticket ${emergency.ticketReference} (possible gas leak or carbon monoxide) is open, so nothing can be booked in this conversation until an Operator resolves it. Apex doesn't fix gas leaks. Tell the Customer to follow the safety advice: leave the property and call National Gas Emergency on 0800 111 999. Quote ${emergency.ticketReference}.`,
+    error: `Refused: Emergency ticket ${emergency.ticketReference} (possible gas leak or carbon monoxide) is open, so nothing can be booked, in this chat or any other, until an Operator resolves it. Apex doesn't fix gas leaks. Tell the Customer to follow the safety advice: leave the property and call National Gas Emergency on 0800 111 999. Quote ${emergency.ticketReference}.`,
   };
 }
 

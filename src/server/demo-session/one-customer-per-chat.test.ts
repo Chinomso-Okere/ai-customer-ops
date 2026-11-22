@@ -73,6 +73,25 @@ describe("One Customer per chat: Verification", () => {
     expect(afterLock).toMatchObject({ ok: true, result: { verified: false, locked: true, attemptsRemaining: 0 } });
   });
 
+  it("a chat verified as A locks after 3 refusals, and A's Job details close with it", async () => {
+    const { h, customer } = await setup();
+    const sarah = customer("Sarah Mitchell");
+    const james = customer("James Patel");
+    await toolTurn(h, "Sarah here", "verify_customer", pathA(sarah));
+    const open = await toolTurn(h, "Status?", "get_job_details", { jobReference: sarah.jobReferences[0] });
+    expect(open.ok).toBe(true);
+
+    for (let i = 0; i < 3; i++) {
+      const refused = await toolTurn(h, "Try James's job", "verify_customer", pathA(james));
+      expect(refused).toMatchObject({ ok: false, code: "one_customer_per_chat" });
+    }
+    const afterLock = await toolTurn(h, "Try again", "verify_customer", pathA(sarah));
+    expect(afterLock).toMatchObject({ ok: true, result: { verified: false, locked: true, attemptsRemaining: 0 } });
+
+    const details = await toolTurn(h, "Status?", "get_job_details", { jobReference: sarah.jobReferences[0] });
+    expect(details.ok).toBe(false);
+  });
+
   it("no oracle: another Customer's correct details and garbage details get the identical refusal", async () => {
     const { h, customer } = await setup();
     await book(h, HANNAH);
@@ -182,6 +201,42 @@ describe("One Customer per chat: Booking", () => {
     expect(confirmed).toMatchObject({ ok: false, code: "one_customer_per_chat" });
     const state = await h.service.getDashboardState(h.sessionId);
     expect(state.demoCustomers.map((c) => c.fullName)).not.toContain("Hannah Brooks");
+  });
+});
+
+describe("One Customer per chat: Emergency Visits are exempt", () => {
+  const PRIYA = {
+    fullName: "Priya Shah",
+    postcode: "SE5 8AA",
+    email: "priya.shah@example.com",
+    issueType: "Boiler Repair",
+  };
+
+  it("after booking as A, a flood Emergency Visit for B is proposed and confirmed, and does not change the chat's Customer", async () => {
+    const { h } = await setup();
+    await book(h, HANNAH);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "water is pouring out of my neighbour's boiler!");
+
+    const proposal = await toolTurn(h, "Please send someone for her", "propose_emergency_visit", PRIYA);
+    expect(proposal.ok).toBe(true);
+    if (!proposal.ok) return;
+    const confirmed = await toolTurn(h, "yes, book it", "confirm_action", { pendingActionId: proposal.result.pendingActionId });
+    expect(confirmed.ok).toBe(true);
+
+    // The chat is still about Hannah: a second Job for her is allowed, one for Priya is refused.
+    expect((await propose(h, HANNAH, 1)).ok).toBe(true);
+    expect(await propose(h, { ...HANNAH, ...PRIYA })).toMatchObject({ ok: false, code: "one_customer_per_chat" });
+  });
+
+  it("an Emergency Visit does not set the chat's Customer: a Booking for someone else is still allowed afterwards", async () => {
+    const { h } = await setup();
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "sparks coming out of the socket!");
+    const proposal = await toolTurn(h, "please send someone", "propose_emergency_visit", PRIYA);
+    if (!proposal.ok) throw new Error(proposal.error);
+    const confirmed = await toolTurn(h, "yes, book it", "confirm_action", { pendingActionId: proposal.result.pendingActionId });
+    expect(confirmed.ok).toBe(true);
+
+    expect((await propose(h, HANNAH)).ok).toBe(true);
   });
 });
 

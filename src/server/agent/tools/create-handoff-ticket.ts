@@ -1,4 +1,5 @@
-import { normaliseUkPhone } from "@/domain/uk-phone";
+import { contactStillNeeded } from "@/domain/callback-contact";
+import { normaliseCallbackPhone } from "@/domain/uk-phone";
 import { ESCALATION_REASONS, URGENCIES, type Urgency } from "@/domain/vocabulary";
 import { getVerification, verifiedJobId } from "@/server/verification";
 import { DEFAULT_URGENCY, raiseHandoffTicket } from "../handoff-tickets";
@@ -51,12 +52,12 @@ export const createHandoffTicket: AgentTool = {
     if (!summary || !recommendedNextStep) return { ok: false, error: "summary and recommendedNextStep are required." };
     const contactName = typeof input.customerName === "string" && input.customerName.trim() ? input.customerName.trim() : null;
     const rawPhone = typeof input.customerPhone === "string" ? input.customerPhone.trim() : "";
-    const contactPhone = rawPhone ? normaliseUkPhone(rawPhone) ?? null : null;
+    const contactPhone = rawPhone ? normaliseCallbackPhone(rawPhone) ?? null : null;
     if (rawPhone && !contactPhone) {
       return {
         ok: false,
         code: "invalid_phone",
-        error: "That doesn't look like a UK phone number. Ask the Customer to check it and give it again; nothing was saved.",
+        error: "That doesn't look like a valid phone number (a UK number, or an international one starting with +). Ask the Customer to check it and give it again; nothing was saved.",
       };
     }
     const urgency = parseUrgency(input.urgency);
@@ -99,7 +100,7 @@ export const createHandoffTicket: AgentTool = {
     }
 
     // An Emergency callback needs both a name and a number.
-    const contactStillNeeded = reason === "Emergency" && !(ticket.contactName && ticket.contactPhone);
+    const needsContact = reason === "Emergency" && contactStillNeeded(ticket);
     return {
       ok: true,
       result: {
@@ -107,8 +108,8 @@ export const createHandoffTicket: AgentTool = {
         escalationReason: reason,
         urgency: ticket.urgency,
         ticketAction: ticket.isNew ? "created" : "appended",
-        contactStillNeeded,
-        guidance: contactStillNeeded
+        contactStillNeeded: needsContact,
+        guidance: needsContact
           ? `Ask the Customer for their name and a phone number so the Apex team can call them back, then call create_handoff_ticket again with reason Emergency and those details. Quote ${ticket.ticketReference}. Do not promise a callback until you have a number.`
           : `Tell the Customer a member of the Apex team will follow up, and quote ${ticket.ticketReference}. Do not act on this topic yourself.`,
       },

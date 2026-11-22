@@ -17,6 +17,7 @@ import type {
 } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import type { ModelClient, ModelRequest, ModelResponse } from "@/server/model-client";
 import { PRICE_LIST } from "@/server/agent/price-list";
+import { PREFILTER_HISTORY_NOTE_PREFIX } from "@/server/agent/safety-scripts";
 import { ISSUE_TYPES, type IssueType } from "@/domain/vocabulary";
 import { assertValidMessages, reply, text, toolCall } from "./scripted-model-client";
 
@@ -249,7 +250,7 @@ const PHONE = /(?:\+|\b)\d[\d\s().-]{8,}\d/;
 /** The Emergency pre-filter fired earlier in this conversation (it leaves a note in the history). */
 function emergencyShown(messages: readonly BetaMessageParam[]): boolean {
   return messages.some(
-    (m) => m.role === "assistant" && JSON.stringify(m.content).includes("Emergency pre-filter fired"),
+    (m) => m.role === "assistant" && JSON.stringify(m.content).includes(PREFILTER_HISTORY_NOTE_PREFIX),
   );
 }
 
