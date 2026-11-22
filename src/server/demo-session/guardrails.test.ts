@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { MESSAGE_CAP_REPLY, MAX_CUSTOMER_MESSAGES_PER_DEMO_SESSION } from "@/server/agent";
 import type { Database } from "@/server/db/database";
-import { DemoSessionRateLimitedError } from "@/server/demo-session";
+import {
+  DemoSessionNotFoundError,
+  DemoSessionRateLimitedError,
+  MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR,
+} from "@/server/demo-session";
 import { createHarness, london } from "@/server/testing/harness";
 import { ScriptedModelClient, reply, text } from "@/server/testing/scripted-model-client";
 
@@ -60,13 +64,14 @@ describe("Guardrails", () => {
     expect(model.requests).toHaveLength(MAX_CUSTOMER_MESSAGES_PER_DEMO_SESSION);
   });
 
-  it("at most 3 new Demo Sessions per IP per hour; the 4th is refused until the hour has passed", async () => {
+  it("at most 10 new Demo Sessions per IP per hour; the 11th is refused until the hour has passed", async () => {
     const { service, clock } = await createHarness({ now: WEDNESDAY });
     const ip = "203.0.113.7";
+    expect(MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR).toBe(10);
 
     const first = await service.createDemoSession({ clientIp: ip });
     clock.set(london("2026-11-18T11:50"));
-    await service.createDemoSession({ clientIp: ip });
+    for (let i = 0; i < 8; i++) await service.createDemoSession({ clientIp: ip });
     await service.openDemoSession(undefined, { clientIp: ip });
     clock.set(london("2026-11-18T12:29"));
     await expect(service.createDemoSession({ clientIp: ip })).rejects.toBeInstanceOf(
@@ -85,6 +90,73 @@ describe("Guardrails", () => {
     await expect(service.createDemoSession({ clientIp: ip })).rejects.toBeInstanceOf(
       DemoSessionRateLimitedError,
     );
+  });
+
+  // Each test uses its own IP: one database is shared per file and the limit counts per IP.
+  describe("reset", () => {
+    it("replaces the Demo Session, so resetting many times in a row never hits the rate limit", async () => {
+      const { service } = await createHarness({ now: WEDNESDAY });
+      const ip = "203.0.113.10";
+
+      let current = await service.createDemoSession({ clientIp: ip });
+      for (let i = 0; i < MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR * 2; i++) {
+        const next = await service.resetDemoSession(current, { clientIp: ip });
+        expect(next).not.toBe(current);
+        current = next;
+      }
+      expect((await service.getDashboardState(current)).sessionId).toBe(current);
+    });
+
+    it("deletes the old Demo Session with its Jobs, tickets and chat", async () => {
+      const model = new ScriptedModelClient();
+      const { service, db } = await createHarness({ now: WEDNESDAY, modelClient: model });
+      const old = await service.createDemoSession({ clientIp: "203.0.113.20" });
+      const conversationId = await service.openConversation(old, undefined);
+      model.script(reply([text("Hello!")]));
+      await service.sendCustomerMessage(old, conversationId, "Hi");
+      await service.sendCustomerMessage(old, conversationId, "I smell gas");
+      expect(Object.keys(await rowsScopedTo(db, old))).toEqual(
+        expect.arrayContaining(["job", "handoff_ticket", "chat_message"]),
+      );
+
+      const next = await service.resetDemoSession(old, { clientIp: "203.0.113.20" });
+
+      await expect(service.getDashboardState(old)).rejects.toBeInstanceOf(DemoSessionNotFoundError);
+      expect(await rowsScopedTo(db, old)).toEqual({});
+      expect(next).not.toBe(old);
+      expect((await service.getDashboardState(next)).sessionId).toBe(next);
+    });
+
+    it("still refuses when the caller has no live Demo Session and the IP is at the limit", async () => {
+      const { service } = await createHarness({ now: WEDNESDAY });
+      const ip = "203.0.113.11";
+      for (let i = 0; i < MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR; i++) {
+        await service.createDemoSession({ clientIp: ip });
+      }
+      await expect(service.resetDemoSession(undefined, { clientIp: ip })).rejects.toBeInstanceOf(
+        DemoSessionRateLimitedError,
+      );
+      await expect(service.resetDemoSession("not-a-session", { clientIp: ip })).rejects.toBeInstanceOf(
+        DemoSessionRateLimitedError,
+      );
+    });
+
+    it("session isolation: deletes only the caller's own Demo Session, never another from the same IP", async () => {
+      const { service } = await createHarness({ now: WEDNESDAY });
+      const ip = "203.0.113.12";
+      const mine = await service.createDemoSession({ clientIp: ip });
+      const sameIp = await service.createDemoSession({ clientIp: ip });
+      const otherIp = await service.createDemoSession({ clientIp: "198.51.100.20" });
+      const sameIpBefore = await service.getDashboardState(sameIp);
+      const otherIpBefore = await service.getDashboardState(otherIp);
+
+      await service.resetDemoSession(mine, { clientIp: ip });
+      // A reset with no cookie deletes nothing: the IP alone never selects a Demo Session.
+      await service.resetDemoSession(undefined, { clientIp: ip });
+
+      expect(await service.getDashboardState(sameIp)).toEqual(sameIpBefore);
+      expect(await service.getDashboardState(otherIp)).toEqual(otherIpBefore);
+    });
   });
 
   it("cleanup deletes expired Demo Sessions with all their data, and leaves live ones untouched", async () => {

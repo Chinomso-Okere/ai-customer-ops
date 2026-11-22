@@ -113,9 +113,15 @@ Cost and abuse limits for the public URL (#7):
   `message_cap` reply without calling the model, and the chat offers
   "Start a new demo". Keep the cap hook last in `hooks/index.ts` so the Emergency
   pre-filter still runs past the cap.
-- **New-session rate limit:** at most 3 new Demo Sessions per client IP per
+- **New-session rate limit:** at most 10 new Demo Sessions per client IP per
   rolling hour (`MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR`). Only new sessions count;
-  resuming a live one does not. The API answers `429 { error: "rate_limited" }`
+  resuming a live one does not. "Reset demo" and "Start a new demo" replace the
+  session instead of adding one: `service.resetDemoSession` deletes the visitor's
+  own session (the one in their cookie, never one found by IP) with all its data
+  and creates the new one in one transaction, so resets never hit the limit.
+  If a reset is refused (no live session in the cookie and the IP is at the
+  limit), nothing is deleted and the notice shows next to the Reset button and
+  in the chat. The API answers `429 { error: "rate_limited" }`
   and the page shows a friendly "try again later". The IP comes from
   `x-forwarded-for`, and only a salted SHA-256 hash is stored
   (`demo_session.client_ip_hash`). Expired sessions still count until cleanup
