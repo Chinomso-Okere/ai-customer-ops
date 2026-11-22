@@ -56,6 +56,21 @@ must also refuse (not just advise), enforce the rule in code, as
 `gasEmergencyBookingBlock` does (`src/server/agent/emergency.ts`): the note is
 advice, the block is the guarantee.
 
+## Add detail to an open Handoff Ticket
+
+Later facts reach an open ticket through the same `create_handoff_ticket` call
+(a repeat with the same reason appends; no second tool). Contact details are the
+example: `customerName` and `customerPhone` (required, nullable) fill
+`handoff_ticket.contact_name` / `contact_phone` via `raiseHandoffTicket`, which
+only ever fills a missing value, and the timeline gets an `appended` event. A
+phone goes through `normaliseUkPhone` (`src/domain/uk-phone.ts`) and junk is
+refused with `code: "invalid_phone"`, nothing saved.
+
+The fixed Emergency notice reads the ticket afterwards: its `handoff_notice`
+payload carries `contactNeeded`, which is true until both fields are set, so a
+repeat Emergency message asks again. Wording stays in code
+(`emergencyNotice` in `hooks/emergency-prefilter.ts`); tests assert the payload.
+
 ## Test helpers
 
 - `createHarness({ now })` (`src/server/testing/harness.ts`) returns `service`,

@@ -95,7 +95,7 @@ The Agent stopping its own handling of a topic and passing it to an Operator.
 _Avoid_: Transfer, handover
 
 **Handoff Ticket**:
-The structured record of an Escalation (Customer details, conversation summary, urgency, recommended next step) that Operators acknowledge and resolve.
+The structured record of an Escalation (Customer details and, once given, the callback name and phone; conversation summary, urgency, recommended next step) that Operators acknowledge and resolve.
 _Avoid_: Ticket (alone), case, support request
 
 **Escalation Reason**:

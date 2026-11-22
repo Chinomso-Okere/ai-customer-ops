@@ -50,6 +50,7 @@ export function HandoffTicketQueue({
                     {t.jobReference ? ` · ${t.jobReference}` : ""}
                     {appendedCount(t) > 0 ? ` · ${appendedCount(t)} follow-up message(s)` : ""}
                   </span>
+                  <span className="ticket__meta">{contactLine(t)}</span>
                 </button>
                 <p className="ticket__next">
                   <strong>Next step:</strong> {t.recommendedNextStep}
@@ -62,6 +63,12 @@ export function HandoffTicketQueue({
       )}
     </section>
   );
+}
+
+/** Who to call back, as far as the Customer has said; shown in the queue and in the ticket detail. */
+function contactLine(t: DashboardHandoffTicket): string {
+  const known = [t.contactName, t.contactPhone].filter(Boolean);
+  return known.length > 0 ? `Contact: ${known.join(" · ")}` : "No contact details yet";
 }
 
 function appendedCount(t: DashboardHandoffTicket): number {
@@ -113,6 +120,7 @@ function TicketDetail({ ticket, onChanged }: { ticket: DashboardHandoffTicket; o
 
   return (
     <div className="ticket__detail">
+      <p className="ticket__contact">{contactLine(ticket)}</p>
       <div className="ticket__actions">
         <button
           type="button"

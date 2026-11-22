@@ -173,6 +173,7 @@ body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); }
 .ticket__toggle { all: unset; display: flex; flex-direction: column; width: 100%; cursor: pointer; box-sizing: border-box; }
 .ticket__toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
 .ticket__detail { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); min-width: 0; }
+.ticket__contact { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 .ticket__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .ticket__subtitle { margin: 10px 0 4px; font-size: 13px; }
 .ticket__timeline { margin: 0; padding-left: 18px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }

@@ -115,6 +115,17 @@ describe("dev scripted model", () => {
     expect(await c.toolsCalled()).toEqual([]);
   });
 
+  it("attaches the name and phone a Customer gives after an Emergency to the open ticket", async () => {
+    const c = await chat();
+    await c.send(scenario("I smell gas"));
+
+    await c.say("I'm Hannah Brooks, my number is 07700 900123");
+
+    expect(await c.toolsCalled()).toEqual(["create_handoff_ticket"]);
+    const ticket = (await c.dashboard()).handoffTickets.find((t) => t.conversationId === c.conversationId)!;
+    expect(ticket).toMatchObject({ contactName: "Hannah Brooks", contactPhone: "+447700900123" });
+  });
+
   it("answers small talk without calling any tool", async () => {
     const c = await chat();
     const { replies } = await c.send("Hello there");
