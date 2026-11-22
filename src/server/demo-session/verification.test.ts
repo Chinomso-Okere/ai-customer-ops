@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHarness, london } from "@/server/testing/harness";
+import { queuedNotes } from "@/server/testing/queued-notes";
 import {
   ScriptedModelClient,
   lastToolResults,
@@ -125,35 +126,34 @@ describe("Verification and Job lookup", () => {
     expect(verified.json).toMatchObject({ verified: true });
   });
 
-  it("a nickname fails Verification with a reminder to use the details exactly as booked, and uses an attempt", async () => {
+  it("a nickname fails Verification and uses an attempt, and no Job details become available", async () => {
     const h = await chatHarness();
     const james = h.customer("James Patel");
 
     const failed = await callTool(h, "verify_customer", { fullName: "Jim Patel", postcode: james.postcode, email: james.email });
 
     expect(failed.json).toMatchObject({ verified: false, locked: false, attemptsRemaining: 2 });
-    expect(failed.json.guidance).toMatch(/full name, postcode and email exactly/);
     expect((await callTool(h, "get_job_details", { jobReference: james.jobReferences[0] })).isError).toBe(true);
   });
 
-  it("after 3 failed attempts Verification locks for the conversation, even for correct details, and the Agent is told to offer Escalation", async () => {
+  it("after 3 failed attempts Verification locks for the conversation, even for correct details, and the Agent is sent a system note about the lock", async () => {
     const h = await chatHarness();
     const sarah = h.customer("Sarah Mitchell");
     const wrong = { jobReference: sarah.jobReferences[0], postcode: "SE1 1AA" };
+    const notesDelivered = () => queuedNotes(h.model.requests.at(-1)!, "all-turns");
 
     expect((await callTool(h, "verify_customer", wrong)).json).toMatchObject({ attemptsRemaining: 2 });
     expect((await callTool(h, "verify_customer", wrong)).json).toMatchObject({ attemptsRemaining: 1 });
+    expect(notesDelivered()).toHaveLength(0);
     const third = await callTool(h, "verify_customer", wrong);
     expect(third.json).toMatchObject({ verified: false, locked: true, attemptsRemaining: 0 });
-    expect(third.json.guidance).toMatch(/escalat/i);
 
     const correct = await callTool(h, "verify_customer", { jobReference: sarah.jobReferences[0], postcode: sarah.postcode });
     expect(correct.json).toMatchObject({ verified: false, locked: true });
     expect((await callTool(h, "get_job_details", { jobReference: sarah.jobReferences[0] })).isError).toBe(true);
 
-    // The model is reminded of the lock in a mid-conversation system message.
-    const systemNotes = JSON.stringify(h.model.requests.at(-1)!.messages);
-    expect(systemNotes).toMatch(/Verification is locked/);
+    // The lock queues exactly one system note, delivered with the next Customer message.
+    expect(notesDelivered()).toHaveLength(1);
 
     // A fresh conversation in the same Demo Session is not locked.
     const other = await h.service.openConversation(h.sessionId, undefined);

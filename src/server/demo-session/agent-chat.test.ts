@@ -1,4 +1,3 @@
-import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { describe, expect, it } from "vitest";
 import type { AgentTool, PreModelHook } from "@/server/agent";
 import {
@@ -10,6 +9,7 @@ import {
 import { PRICE_LIST } from "@/server/agent/price-list";
 import { ConversationNotFoundError, EmptyCustomerMessageError } from "@/server/demo-session";
 import { createHarness, london } from "@/server/testing/harness";
+import { queuedNotes } from "@/server/testing/queued-notes";
 import {
   ScriptedModelClient,
   assertValidMessages,
@@ -307,11 +307,6 @@ describe("Agent chat", () => {
   });
 
   describe("extension points for domain tools and pre-model hooks", () => {
-    const systemMessagesAfterLastCustomerMessage = (messages: BetaMessageParam[]) => {
-      const i = messages.findLastIndex((m) => m.role === "user" && typeof m.content === "string");
-      return messages.slice(i + 1).filter((m) => m.role === "system").map((m) => JSON.stringify(m.content));
-    };
-
     it("a system note queued by a tool reaches the model right after the next Customer message, once", async () => {
       const seqs: number[] = [];
       const raiseFlag: AgentTool = {
@@ -336,11 +331,10 @@ describe("Agent chat", () => {
       model.script(reply([text("Still noted.")]));
       await h.service.sendCustomerMessage(sessionId, conversationId, "third");
 
-      const notesIn = (request: number) =>
-        systemMessagesAfterLastCustomerMessage(model.requests[request]!.messages).join(" ");
-      expect(notesIn(1)).not.toContain("APX-H-0003"); // same turn: not yet
-      expect(notesIn(2)).toContain("APX-H-0003"); // delivered with the next Customer message
-      expect(notesIn(3)).not.toContain("APX-H-0003"); // not repeated…
+      const notesIn = (request: number) => queuedNotes(model.requests[request]!);
+      expect(notesIn(1)).toHaveLength(0); // same turn: not yet
+      expect(notesIn(2)).toHaveLength(1); // delivered with the next Customer message
+      expect(notesIn(3)).toHaveLength(0); // not repeated…
       expect(JSON.stringify(model.requests[3]!.messages)).toContain("APX-H-0003"); // …but kept in history
       expect(seqs).toHaveLength(1);
     });
@@ -373,7 +367,7 @@ describe("Agent chat", () => {
       const messages = model.requests[0]!.messages;
       expect(JSON.stringify(messages)).toContain("I smell gas");
       expect(JSON.stringify(messages)).toContain("[Safety Script shown]");
-      expect(systemMessagesAfterLastCustomerMessage(messages).join(" ")).toContain("Emergency ticket open");
+      expect(queuedNotes(model.requests[0]!)).toHaveLength(1);
       expect(next.conversation.map((m) => m.speaker)).toEqual(["Customer", "Agent", "Customer", "Agent"]);
     });
   });

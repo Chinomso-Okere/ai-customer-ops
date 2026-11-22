@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ModelRequest } from "@/server/model-client";
 import { london } from "@/server/testing/harness";
+import { queuedNotes } from "@/server/testing/queued-notes";
 import { reply, text } from "@/server/testing/scripted-model-client";
 import { chatHarness, toolTurn, toolTurns, type ChatHarness } from "@/server/testing/tool-turns";
 
@@ -23,13 +23,6 @@ async function proposeFirstWindow(h: ChatHarness) {
     ["propose_booking", (prev) => ({ ...NEW_CUSTOMER, ...pick(prev[0]!.ok ? prev[0]!.result.windows[0] : {}) })],
   ]);
   return { availability: availability!, proposal: proposal! };
-}
-
-/** The harness's system messages delivered at the start of the request's last Customer turn. */
-function systemMessagesAfterLastCustomerMessage(request: ModelRequest): string[] {
-  const { messages } = request;
-  const i = messages.findLastIndex((m) => m.role === "user" && typeof m.content === "string");
-  return messages.slice(i + 1).filter((m) => m.role === "system").map((m) => JSON.stringify(m.content));
 }
 
 async function openEmergencyTicket(h: ChatHarness) {
@@ -88,7 +81,7 @@ describe("Gas/CO Emergency: no booking until an Operator resolves the ticket", (
 
     const [first, latest] = [h.model.requests[0]!, h.model.requests.at(-1)!];
     expect(latest.system).toEqual(first.system);
-    const notes = systemMessagesAfterLastCustomerMessage(latest).join(" ");
+    const notes = queuedNotes(latest).join(" ");
     expect(notes).toContain(ticket.ticketReference);
     expect(notes).toContain("0800 111 999");
   });
@@ -101,7 +94,7 @@ describe("Gas/CO Emergency: no booking until an Operator resolves the ticket", (
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "ok, I'm outside");
     h.model.script(reply([text("Please wait for the gas engineers.")]));
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "still waiting");
-    expect(systemMessagesAfterLastCustomerMessage(h.model.requests.at(-1)!).join(" ")).not.toContain(
+    expect(queuedNotes(h.model.requests.at(-1)!).join(" ")).not.toContain(
       ticket.ticketReference,
     );
 
@@ -111,7 +104,7 @@ describe("Gas/CO Emergency: no booking until an Operator resolves the ticket", (
 
     const latest = h.model.requests.at(-1)!;
     expect(latest.system).toEqual(h.model.requests[0]!.system);
-    expect(systemMessagesAfterLastCustomerMessage(latest).join(" ")).toContain(ticket.ticketReference);
+    expect(queuedNotes(latest).join(" ")).toContain(ticket.ticketReference);
   });
 
   it("resolving a flood Emergency or a non-Emergency ticket queues no such note", async () => {
@@ -125,7 +118,7 @@ describe("Gas/CO Emergency: no booking until an Operator resolves the ticket", (
     h.model.script(reply([text("Anything else?")]));
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "thanks");
 
-    expect(systemMessagesAfterLastCustomerMessage(h.model.requests.at(-1)!).join(" ")).not.toContain(
+    expect(queuedNotes(h.model.requests.at(-1)!).join(" ")).not.toContain(
       ticket.ticketReference,
     );
   });
@@ -225,7 +218,7 @@ describe("Flood/sparks Emergency: the earliest Emergency Visit", () => {
     h.model.script(reply([text("I can send an Engineer.")]));
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "what now?");
 
-    const notes = systemMessagesAfterLastCustomerMessage(h.model.requests.at(-1)!).join(" ");
+    const notes = queuedNotes(h.model.requests.at(-1)!).join(" ");
     expect(notes).toContain(ticket.ticketReference);
     expect(notes).toContain("propose_emergency_visit");
   });
