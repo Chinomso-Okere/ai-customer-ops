@@ -109,6 +109,8 @@ export type ToolOutcome =
 export type ToolErrorCode =
   | "outside_coverage_area"
   | "not_verified"
+  /** The chat already has a Customer (#27) and these details are not theirs. */
+  | "one_customer_per_chat"
   /** Set by the runner: this exact call already failed the same way in this turn. */
   | "repeated_failed_call";
 
@@ -118,6 +120,17 @@ export const TOOL_ERRORS = {
     ok: false,
     code: "not_verified",
     error: "The Customer is not verified in this conversation. Call verify_customer first.",
+  },
+  /**
+   * One chat is about one Customer (#27). Used for a Verification that did not
+   * match the chat's Customer and for a Booking naming someone else; the
+   * wording must never say whether the details belong to anyone.
+   */
+  oneCustomerPerChat: {
+    ok: false,
+    code: "one_customer_per_chat",
+    error:
+      "Refused: this chat can only help with one Customer. Tell the Customer that, and ask them to start a new chat (the New chat button) to get help with anyone else's Job. Do not say whether the details they gave belong to anyone, and do not call this tool again with other people's details.",
   },
   outsideCoverageArea: (outwardCode: string) => ({
     ok: false as const,

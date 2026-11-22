@@ -3,8 +3,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { ChatMessage, CustomerTurnResult } from "@/server/demo-session";
 
-async function openConversation(): Promise<ChatMessage[]> {
-  const response = await fetch("/api/conversation", { method: "POST" });
+/** Resumes the visitor's conversation; with `fresh`, starts a new one (one chat is about one Customer). */
+async function openConversation(fresh = false): Promise<ChatMessage[]> {
+  const response = await fetch("/api/conversation", {
+    method: "POST",
+    ...(fresh && { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fresh: true }) }),
+  });
   if (!response.ok) throw new Error(`Chat unavailable (${response.status})`);
   return ((await response.json()) as { messages: ChatMessage[] }).messages;
 }
@@ -103,6 +107,18 @@ export function ChatWidget({
     }
   };
 
+  /** New chat: a fresh conversation in the same Demo Session (the Dashboard keeps its data). */
+  const startNewChat = async () => {
+    if (pending || !sessionId) return;
+    setError(null);
+    try {
+      setMessages(await openConversation(true));
+      setDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const send = (e: FormEvent) => {
     e.preventDefault();
     void sendText(draft);
@@ -120,7 +136,12 @@ export function ChatWidget({
 
   return (
     <div className="chat" aria-label="Chat with Apex">
-      <div className="chat__header">Chat with Apex</div>
+      <div className="chat__header">
+        Chat with Apex
+        <button type="button" className="chat__new-chat" onClick={() => void startNewChat()} disabled={!sessionId || !!pending}>
+          New chat
+        </button>
+      </div>
       <div className="chat__messages" ref={scroller} aria-live="polite">
         {messages.length === 0 && !pending && (
           <p className="muted">Ask about prices, check we cover your postcode, or tell us what&apos;s wrong.</p>

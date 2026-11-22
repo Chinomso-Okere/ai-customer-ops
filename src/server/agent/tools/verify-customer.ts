@@ -1,5 +1,8 @@
 import { attemptVerification } from "@/server/verification";
-import type { AgentTool } from "../types";
+import { TOOL_ERRORS, type AgentTool } from "../types";
+
+const LOCKED_NOTE =
+  "Verification is locked for this conversation (3 failed attempts). Do not share any Job details; offer Escalation to an Apex team member instead.";
 
 const FAILED_GUIDANCE =
   "The details did not match. Do not say which detail was wrong. Remind the Customer to use their full name, postcode and email exactly as they were given when booking (no nicknames), or their Job Reference with postcode or email.";
@@ -26,7 +29,7 @@ export const verifyCustomer: AgentTool = {
     additionalProperties: false,
   },
   promptGuidance:
-    "Never reveal Job, Visit, Engineer or Parts Order details until verify_customer has succeeded in this conversation; Customers stay verified for the rest of the conversation. If the Customer has several Jobs and has not named one, list them by Job Reference and short description and ask which one they mean.",
+    "Never reveal Job, Visit, Engineer or Parts Order details until verify_customer has succeeded in this conversation; Customers stay verified for the rest of the conversation. If the Customer has several Jobs and has not named one, list them by Job Reference and short description and ask which one they mean. One chat is about one Customer: if verify_customer is refused with the errorCode one_customer_per_chat, tell the Customer this chat can only help with one Customer and ask them to start a new chat for someone else's Job. Never say whether the details they gave belong to anyone.",
   async run(input, ctx) {
     const str = (v: unknown) => (typeof v === "string" ? v : undefined);
     const outcome = await attemptVerification(
@@ -48,12 +51,11 @@ export const verifyCustomer: AgentTool = {
         };
       case "locked":
         return { ok: true, result: { verified: false, locked: true, attemptsRemaining: 0, guidance: LOCKED_GUIDANCE } };
+      case "otherCustomer":
+        if (outcome.locked) await ctx.enqueueSystemNote(LOCKED_NOTE);
+        return TOOL_ERRORS.oneCustomerPerChat;
       case "failed":
-        if (outcome.locked) {
-          await ctx.enqueueSystemNote(
-            "Verification is locked for this conversation (3 failed attempts). Do not share any Job details; offer Escalation to an Apex team member instead.",
-          );
-        }
+        if (outcome.locked) await ctx.enqueueSystemNote(LOCKED_NOTE);
         return {
           ok: true,
           result: {

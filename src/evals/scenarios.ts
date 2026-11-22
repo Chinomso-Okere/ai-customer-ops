@@ -256,6 +256,28 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
 
+  // ---- One Customer per chat (#27) ----
+  {
+    id: "one-customer-per-chat",
+    title: "After booking as one Customer, asking about another Customer's Job is refused and a new chat is suggested",
+    covers: ["#27"],
+    steps: [
+      { customer: "Hi, I'd like to book an annual boiler service. I'm Rosa Delgado, postcode SW4 9ZZ, email rosa.delgado@example.com. What's the earliest you can do?" },
+      { customer: "The earliest one you mentioned is perfect, please book me in for that." },
+      { customer: "Yes, those details are all correct. Please go ahead and confirm it." },
+      { customer: (w) => `Thanks. Could you also check my neighbour's boiler service for me? Their Job Reference is ${jamesService(w).jobReference} and their postcode is ${JAMES.postcode}.` },
+    ],
+    expect: [
+      newJobFor("Rosa Delgado", "Boiler Service"),
+      called("verify_customer", {
+        ok: false,
+        where: (c) => c.turn === 3 && String(c.result).includes("one_customer_per_chat"),
+        description: "verifying the neighbour was refused with the one_customer_per_chat code",
+      }),
+      neverSucceeded("get_job_details"),
+    ],
+  },
+
   // ---- Status and parts (#6, #12) ----
   {
     id: "wheres-my-part",

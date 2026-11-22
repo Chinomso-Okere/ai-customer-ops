@@ -133,14 +133,16 @@ describe("Cancel a Visit more than 24h away", () => {
     await toolTurn(h, "yes", "confirm_action", { pendingActionId: proposal.result.pendingActionId });
     expect(await visitsFridayAm()).toBe(before - 1);
 
-    const again = await toolTurn(h, "Book Friday morning for my brother", "propose_booking", {
+    // A different Customer needs their own chat (one Customer per chat).
+    const brothersChat: ChatHarness = { ...h, conversationId: await h.service.openConversation(h.sessionId, undefined) };
+    const again = await toolTurn(brothersChat, "Book Friday morning for my brother", "propose_booking", {
       ...CUSTOMER,
       fullName: "Tom Brooks",
       email: "tom.brooks@example.com",
       ...FRIDAY_AM,
     });
     if (!again.ok) throw new Error(again.error);
-    const booked = await toolTurn(h, "yes", "confirm_action", { pendingActionId: again.result.pendingActionId });
+    const booked = await toolTurn(brothersChat, "yes", "confirm_action", { pendingActionId: again.result.pendingActionId });
     expect(booked.ok).toBe(true);
     expect(await visitsFridayAm()).toBe(before);
   });

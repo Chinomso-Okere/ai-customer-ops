@@ -90,6 +90,10 @@ _Avoid_: Consent, approval
 Proving a Customer's identity before the Agent reveals Job details: either Job Reference plus postcode or email, or full name plus postcode plus email.
 _Avoid_: Login, authentication
 
+**Chat's Customer**:
+The one Customer a conversation is about, set by the conversation's first successful Verification or Booking. After that the Agent only verifies, and only books for, that Customer; anyone else needs a New chat.
+_Avoid_: Session user, account
+
 **Escalation**:
 The Agent stopping its own handling of a topic and passing it to an Operator.
 _Avoid_: Transfer, handover

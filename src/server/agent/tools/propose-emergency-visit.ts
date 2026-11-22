@@ -1,6 +1,7 @@
 import { ISSUE_TYPES } from "@/domain/vocabulary";
 import { describeWindow } from "@/server/scheduling/availability";
 import { emergencyVisitWindow } from "@/server/scheduling/emergency-visit";
+import { oneCustomerPerChatBlock } from "../chat-customer";
 import { proposeAction } from "../confirmation";
 import type { EmergencyVisitPayload } from "../confirmation/emergency-visit";
 import { openEmergency } from "../emergency";
@@ -40,6 +41,8 @@ export const proposeEmergencyVisit: AgentTool = {
     }
     const details = parseBookingDetails(input);
     if (!details.ok) return details;
+    const otherCustomer = await oneCustomerPerChatBlock(ctx.db, ctx, details);
+    if (otherCustomer) return otherCustomer;
 
     const window = emergencyVisitWindow(ctx.now);
     const payload: EmergencyVisitPayload = {

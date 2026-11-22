@@ -1,6 +1,8 @@
 import { timeWindowEnd } from "@/domain/time-window";
 import { describeWindow } from "@/server/scheduling/availability";
 import { EMERGENCY_VISIT_MIN_REMAINING_MS, bookEmergencyVisit } from "@/server/scheduling/emergency-visit";
+import { setChatCustomerIfUnset } from "@/server/verification";
+import { oneCustomerPerChatBlock } from "../chat-customer";
 import type { BookingPayload } from "./booking";
 import type { PendingActionKind } from "./pending-actions";
 
@@ -11,6 +13,9 @@ export type EmergencyVisitPayload = BookingPayload;
 export const emergencyVisitAction: PendingActionKind<EmergencyVisitPayload> = {
   kind: "emergency_visit",
   async execute(tx, ctx, p) {
+    // The chat's Customer may have been set since the proposal (e.g. by Verification).
+    const otherCustomer = await oneCustomerPerChatBlock(tx, ctx, p);
+    if (otherCustomer) return otherCustomer;
     const window = { date: p.date, timeWindow: p.timeWindow };
     if (timeWindowEnd(window.date, window.timeWindow).getTime() < ctx.now.getTime() + EMERGENCY_VISIT_MIN_REMAINING_MS) {
       return {
@@ -26,6 +31,7 @@ export const emergencyVisitAction: PendingActionKind<EmergencyVisitPayload> = {
       now: ctx.now,
     });
     if (!booked) return { ok: false, error: `No Engineer is skilled for ${p.issueType}. Tell the Customer the team will call them.` };
+    await setChatCustomerIfUnset(tx, ctx, booked.customerId);
     return {
       ok: true,
       result: {

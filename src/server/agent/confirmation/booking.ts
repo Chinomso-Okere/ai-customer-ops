@@ -2,6 +2,8 @@ import type { TimeWindow } from "@/domain/time-window";
 import type { IssueType } from "@/domain/vocabulary";
 import { describeWindow } from "@/server/scheduling/availability";
 import { bookJob } from "@/server/scheduling/booking";
+import { setChatCustomerIfUnset } from "@/server/verification";
+import { oneCustomerPerChatBlock } from "../chat-customer";
 import type { PendingActionKind } from "./pending-actions";
 
 /** What `propose_booking` stores, already validated. */
@@ -21,6 +23,9 @@ export interface BookingPayload {
 export const bookingAction: PendingActionKind<BookingPayload> = {
   kind: "booking",
   async execute(tx, ctx, p) {
+    // The chat's Customer may have been set since the proposal (e.g. by Verification).
+    const otherCustomer = await oneCustomerPerChatBlock(tx, ctx, p);
+    if (otherCustomer) return otherCustomer;
     const window = { date: p.date, timeWindow: p.timeWindow };
     const booked = await bookJob(tx, ctx.sessionId, {
       customer: { fullName: p.fullName, postcode: p.postcode, email: p.email, phone: p.phone },
@@ -35,6 +40,7 @@ export const bookingAction: PendingActionKind<BookingPayload> = {
         error: `Not booked: ${describeWindow(window)} is no longer available. Apologise, call get_availability and offer new windows.`,
       };
     }
+    await setChatCustomerIfUnset(tx, ctx, booked.customerId);
     return {
       ok: true,
       result: {

@@ -1,6 +1,7 @@
 import { formatPostcode, isInCoverageArea, normalisePostcode, outwardCode } from "@/domain/coverage-area";
 import { ISSUE_TYPES, parseIssueType, type IssueType } from "@/domain/vocabulary";
 import { describeWindow, parseWindow, requireAvailableWindow } from "@/server/scheduling/availability";
+import { oneCustomerPerChatBlock } from "../chat-customer";
 import { proposeAction } from "../confirmation";
 import type { BookingPayload } from "../confirmation/booking";
 import { TOOL_ERRORS, type AgentTool, type ToolOutcome } from "../types";
@@ -28,11 +29,13 @@ export const proposeBooking: AgentTool = {
     additionalProperties: false,
   },
   promptGuidance:
-    "To Book: collect full name, postcode, Issue Type and email (phone optional), call get_availability and offer its windows (never invent dates), then call propose_booking with the chosen window. If the Customer has already named a day or window, call get_availability with that day as fromDate; if their window is free, call propose_booking for it in the same turn rather than asking them to choose again. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm before calling confirm_action.",
+    "To Book: collect full name, postcode, Issue Type and email (phone optional), call get_availability and offer its windows (never invent dates), then call propose_booking with the chosen window. If the Customer has already named a day or window, call get_availability with that day as fromDate; if their window is free, call propose_booking for it in the same turn rather than asking them to choose again. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm before calling confirm_action. One chat is about one Customer: if propose_booking is refused with the errorCode one_customer_per_chat, tell the Customer this chat can only help with one Customer and ask them to start a new chat to book for someone else. More Jobs for the same Customer are fine.",
   async run(input, ctx) {
     const details = parseBookingDetails(input);
     if (!details.ok) return details;
     const { fullName, email, issueType, postcode, phone, description } = details;
+    const otherCustomer = await oneCustomerPerChatBlock(ctx.db, ctx, { fullName, email });
+    if (otherCustomer) return otherCustomer;
     const window = parseWindow(input.date, input.timeWindow);
     if (!window) return { ok: false, error: "Give date as YYYY-MM-DD and timeWindow as AM or PM, from get_availability." };
     const check = await requireAvailableWindow(ctx.db, ctx.sessionId, issueType, window, ctx.now);

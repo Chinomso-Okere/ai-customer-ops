@@ -9,6 +9,12 @@
  * removed. No fuzzy name matching. 3 failed attempts lock Verification for the
  * conversation; once verified, the Customer stays verified for it.
  *
+ * One chat is about one Customer (#27): the first successful Verification or
+ * Booking in a conversation sets its Customer, and from then on only that
+ * Customer can be verified. Details for anyone else are refused exactly like
+ * garbage details (the `otherCustomer` outcome), so the refusal never reveals
+ * whether another Customer matches.
+ *
  * Other tools that reveal or change a Customer's data (reschedule, cancel,
  * parts fitting) must gate on `isVerifiedForJob` / `getVerification`.
  */
@@ -55,6 +61,12 @@ export type VerificationOutcome =
       alreadyVerified: boolean;
     }
   | { kind: "failed"; attemptsRemaining: number; locked: boolean }
+  /**
+   * The conversation already has a Customer and these details did not match
+   * them (valid for someone else, or just wrong: callers cannot tell which).
+   * An attempt is used, as for `failed`.
+   */
+  | { kind: "otherCustomer"; attemptsRemaining: number; locked: boolean }
   | { kind: "locked" }
   /** Neither path's details are complete; no attempt is used. */
   | { kind: "incomplete"; missing: string };
@@ -130,6 +142,47 @@ export async function isVerifiedForCustomer(db: Database, ref: ConversationRef, 
   return (await getVerification(db, ref)).verifiedCustomerId === customerId;
 }
 
+/** The Customer this conversation is about, or null if it has none yet. */
+export async function getChatCustomerId(db: Database, ref: ConversationRef): Promise<string | null> {
+  const { rows } = await db.query<{ customer_id: string | null }>(
+    "SELECT customer_id FROM conversation WHERE session_id = $1 AND id = $2",
+    [ref.sessionId, ref.conversationId],
+  );
+  return rows[0]?.customer_id ?? null;
+}
+
+/** Makes `customerId` the chat's Customer unless the conversation already has one. */
+export async function setChatCustomerIfUnset(db: Database, ref: ConversationRef, customerId: string): Promise<void> {
+  await db.query(
+    "UPDATE conversation SET customer_id = $3 WHERE session_id = $1 AND id = $2 AND customer_id IS NULL",
+    [ref.sessionId, ref.conversationId, customerId],
+  );
+}
+
+/**
+ * True when the conversation has a Customer and these Booking details name
+ * someone else (a different full name or email, compared after normalising).
+ */
+export async function isOtherThanChatCustomer(
+  db: Database,
+  ref: ConversationRef,
+  who: { fullName: string; email: string },
+): Promise<boolean> {
+  const { rows } = await db.query<{ full_name: string; email: string }>(
+    `SELECT c.full_name, c.email
+       FROM conversation v
+       JOIN customer c ON c.session_id = v.session_id AND c.id = v.customer_id
+      WHERE v.session_id = $1 AND v.id = $2`,
+    [ref.sessionId, ref.conversationId],
+  );
+  const chatCustomer = rows[0];
+  if (!chatCustomer) return false;
+  return (
+    normaliseName(chatCustomer.full_name) !== normaliseName(who.fullName) ||
+    normaliseEmail(chatCustomer.email) !== normaliseEmail(who.email)
+  );
+}
+
 /** Tries to verify the Customer, recording the attempt. */
 export async function attemptVerification(
   db: Database,
@@ -143,19 +196,22 @@ export async function attemptVerification(
   const email = present(details.email);
   const fullName = present(details.fullName);
 
-  if (state.verifiedCustomerId) {
-    return verified(db, ref.sessionId, state.verifiedCustomerId, jobReference, true);
-  }
   if (state.locked) return { kind: "locked" };
 
-  let match: { customerId: string; jobReference: string | null } | null;
-  if (jobReference && (postcode || email)) {
-    match = await matchPathA(db, ref.sessionId, jobReference, postcode, email);
-  } else if (fullName && postcode && email) {
-    match = await matchPathB(db, ref.sessionId, fullName, postcode, email);
-  } else {
+  const usePathA = jobReference !== null && (postcode !== null || email !== null);
+  const usePathB = !usePathA && fullName !== null && postcode !== null && email !== null;
+  if (!usePathA && !usePathB) {
+    // Nothing to check: a verified Customer just gets their summary again.
+    if (state.verifiedCustomerId) return verified(db, ref.sessionId, state.verifiedCustomerId, jobReference, true);
     return { kind: "incomplete", missing: missingDetails(jobReference, postcode, email, fullName) };
   }
+
+  // Once the chat has a Customer, only that Customer can match: the other
+  // Customers are never looked up.
+  const chatCustomerId = (await getChatCustomerId(db, ref)) ?? state.verifiedCustomerId;
+  const match = usePathA
+    ? await matchPathA(db, ref.sessionId, jobReference!, postcode, email, chatCustomerId)
+    : await matchPathB(db, ref.sessionId, fullName!, postcode!, email!, chatCustomerId);
 
   if (match) {
     await db.query(
@@ -165,7 +221,8 @@ export async function attemptVerification(
          WHERE conversation_verification.session_id = $1`,
       [ref.sessionId, ref.conversationId, match.customerId, now],
     );
-    return verified(db, ref.sessionId, match.customerId, match.jobReference, false);
+    await setChatCustomerIfUnset(db, ref, match.customerId);
+    return verified(db, ref.sessionId, match.customerId, match.jobReference, state.verifiedCustomerId === match.customerId);
   }
 
   const { rows } = await db.query<{ failed_attempts: number }>(
@@ -179,7 +236,12 @@ export async function attemptVerification(
   );
   const failedAttempts = rows[0]!.failed_attempts;
   const attemptsRemaining = Math.max(0, MAX_VERIFICATION_ATTEMPTS - failedAttempts);
-  return { kind: "failed", attemptsRemaining, locked: attemptsRemaining === 0 };
+  return {
+    kind: chatCustomerId ? "otherCustomer" : "failed",
+    attemptsRemaining,
+    // A verified conversation never locks.
+    locked: !state.verifiedCustomerId && attemptsRemaining === 0,
+  };
 }
 
 function present(value: string | undefined): string | null {
@@ -203,13 +265,14 @@ async function matchPathA(
   jobReference: string,
   postcode: string | null,
   email: string | null,
+  onlyCustomerId: string | null,
 ): Promise<{ customerId: string; jobReference: string } | null> {
   const { rows } = await db.query<{ customer_id: string; job_reference: string; postcode: string; email: string }>(
     `SELECT j.customer_id, j.job_reference, c.postcode, c.email
        FROM job j
        JOIN customer c ON c.id = j.customer_id AND c.session_id = j.session_id
-      WHERE j.session_id = $1 AND j.job_reference = $2`,
-    [sessionId, normaliseJobReference(jobReference)],
+      WHERE j.session_id = $1 AND j.job_reference = $2 AND ($3::uuid IS NULL OR j.customer_id = $3::uuid)`,
+    [sessionId, normaliseJobReference(jobReference), onlyCustomerId],
   );
   const row = rows[0];
   if (!row) return null;
@@ -225,13 +288,14 @@ async function matchPathB(
   fullName: string,
   postcode: string,
   email: string,
+  onlyCustomerId: string | null,
 ): Promise<{ customerId: string; jobReference: null } | null> {
   const { rows } = await db.query<{ id: string; full_name: string; postcode: string; email: string }>(
     `SELECT id, full_name, postcode, email
        FROM customer
-      WHERE session_id = $1 AND ${sqlEmailEquals("email", "$2")}
+      WHERE session_id = $1 AND ${sqlEmailEquals("email", "$2")} AND ($3::uuid IS NULL OR id = $3::uuid)
       ORDER BY created_at, id`,
-    [sessionId, normaliseEmail(email)],
+    [sessionId, normaliseEmail(email), onlyCustomerId],
   );
   const match = rows.find(
     (c) =>
