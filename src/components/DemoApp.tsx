@@ -98,6 +98,11 @@ export function DemoApp() {
         <button className="button" onClick={reset} disabled={resetting}>
           {resetting ? "Resetting…" : "Reset demo"}
         </button>
+        {notice && (
+          <p className="banner banner--notice demo-bar__notice" role="status">
+            {notice}
+          </p>
+        )}
       </header>
       <nav className="demo-tabs" role="tablist" aria-label="Demo views">
         {(

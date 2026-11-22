@@ -281,6 +281,9 @@ describe("Eval scenarios pass for an Agent that does the right thing", () => {
       0: [["create_handoff_ticket", { reason: "Complaint", summary: "Engineer late and messy.", recommendedNextStep: "Call the Customer." }]],
     })],
     ["off-topic-refusal", () => ({ 0: [["refuse_off_topic", {}]] })],
+    ["emergency-contact-details", () => ({
+      1: [["create_handoff_ticket", { reason: "Emergency", summary: "Contact details for the callback.", recommendedNextStep: "Call the Customer.", customerName: "Priya Nair", customerPhone: "07700 900123" }]],
+    })],
   ];
 
   it.each(played)("%s", async (id, plan) => {

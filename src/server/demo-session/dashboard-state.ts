@@ -120,6 +120,9 @@ export interface DashboardHandoffTicket {
   createdAt: string;
   customer: DashboardCustomer | null;
   jobReference: string | null;
+  /** Who to call back and on what number (normalised, "+44..."), once the Customer has given them in chat. */
+  contactName: string | null;
+  contactPhone: string | null;
   /** The conversation it was raised from; null for seed tickets. */
   conversationId: string | null;
   /** What was added to the ticket, oldest first (empty for seed tickets). */
@@ -259,9 +262,11 @@ export async function readDashboardState(
     email: string | null;
     job_reference: string | null;
     conversation_id: string | null;
+    contact_name: string | null;
+    contact_phone: string | null;
   }>(
     `SELECT t.id, t.ticket_number, t.escalation_reason, t.urgency, t.status, t.summary,
-            t.recommended_next_step, t.created_at, t.conversation_id,
+            t.recommended_next_step, t.created_at, t.conversation_id, t.contact_name, t.contact_phone,
             c.full_name, c.postcode, c.email, j.job_reference
        FROM handoff_ticket t
        LEFT JOIN customer c ON c.id = t.customer_id AND c.session_id = t.session_id
@@ -324,6 +329,8 @@ export async function readDashboardState(
           ? { fullName: t.full_name, postcode: t.postcode, email: t.email }
           : null,
       jobReference: t.job_reference,
+      contactName: t.contact_name,
+      contactPhone: t.contact_phone,
       conversationId: t.conversation_id,
       timeline: timelines.get(t.id) ?? [],
     })),

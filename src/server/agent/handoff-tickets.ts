@@ -28,6 +28,9 @@ export interface RaiseHandoffTicketInput {
   timelineEntry: string;
   /** For an Emergency: which kind. Gas/CO, once reported, sticks to the ticket. */
   emergencyKind?: EmergencyKind;
+  /** The Customer's name and (already normalised) phone for the callback, if given; a repeat fills in what is missing. */
+  contactName?: string | null;
+  contactPhone?: string | null;
   now: Date;
 }
 
@@ -38,6 +41,9 @@ export interface RaisedHandoffTicket {
   urgency: Urgency;
   /** False when an open ticket for this reason already existed and was appended to. */
   isNew: boolean;
+  /** The contact details now on the ticket; a callback needs both. */
+  contactName: string | null;
+  contactPhone: string | null;
 }
 
 /**
@@ -55,8 +61,14 @@ export async function raiseHandoffTicket(
     // Serialises ticket numbering (and the open-ticket check) within the Demo Session.
     await lockDemoSession(tx, sessionId);
 
-    const open = await tx.query<{ id: string; ticket_number: number; urgency: Urgency }>(
-      `SELECT id, ticket_number, urgency FROM handoff_ticket
+    const open = await tx.query<{
+      id: string;
+      ticket_number: number;
+      urgency: Urgency;
+      contact_name: string | null;
+      contact_phone: string | null;
+    }>(
+      `SELECT id, ticket_number, urgency, contact_name, contact_phone FROM handoff_ticket
         WHERE session_id = $1 AND conversation_id = $2 AND escalation_reason = $3
           AND status <> 'Resolved'`,
       [sessionId, conversationId, reason],
@@ -70,9 +82,20 @@ export async function raiseHandoffTicket(
             SET urgency = $3,
                 customer_id = COALESCE(customer_id, $4),
                 job_id = COALESCE(job_id, $5),
-                emergency_kind = CASE WHEN $6::text = 'gas_or_co' THEN $6 ELSE COALESCE(emergency_kind, $6) END
+                emergency_kind = CASE WHEN $6::text = 'gas_or_co' THEN $6 ELSE COALESCE(emergency_kind, $6) END,
+                contact_name = COALESCE($7::text, contact_name),
+                contact_phone = COALESCE($8::text, contact_phone)
           WHERE session_id = $1 AND id = $2`,
-        [sessionId, existing.id, urgency, input.customerId ?? null, input.jobId ?? null, input.emergencyKind ?? null],
+        [
+          sessionId,
+          existing.id,
+          urgency,
+          input.customerId ?? null,
+          input.jobId ?? null,
+          input.emergencyKind ?? null,
+          input.contactName ?? null,
+          input.contactPhone ?? null,
+        ],
       );
       await addEvent(tx, sessionId, existing.id, "appended", input.timelineEntry, now);
       return {
@@ -80,14 +103,16 @@ export async function raiseHandoffTicket(
         ticketReference: handoffTicketReference(existing.ticket_number),
         urgency,
         isNew: false,
+        contactName: input.contactName ?? existing.contact_name,
+        contactPhone: input.contactPhone ?? existing.contact_phone,
       };
     }
 
     const created = await tx.query<{ id: string; ticket_number: number }>(
       `INSERT INTO handoff_ticket (session_id, conversation_id, ticket_number, customer_id, job_id,
                                    escalation_reason, urgency, status, summary, recommended_next_step, created_at,
-                                   emergency_kind)
-       SELECT $1, $2, COALESCE(MAX(ticket_number), 0) + 1, $3, $4, $5, $6, 'Open', $7, $8, $9, $10
+                                   emergency_kind, contact_name, contact_phone)
+       SELECT $1, $2, COALESCE(MAX(ticket_number), 0) + 1, $3, $4, $5, $6, 'Open', $7, $8, $9, $10, $11, $12
          FROM handoff_ticket WHERE session_id = $1
        RETURNING id, ticket_number`,
       [
@@ -101,6 +126,8 @@ export async function raiseHandoffTicket(
         input.recommendedNextStep,
         now,
         input.emergencyKind ?? null,
+        input.contactName ?? null,
+        input.contactPhone ?? null,
       ],
     );
     const ticket = created.rows[0]!;
@@ -110,6 +137,8 @@ export async function raiseHandoffTicket(
       ticketReference: handoffTicketReference(ticket.ticket_number),
       urgency,
       isNew: true,
+      contactName: input.contactName ?? null,
+      contactPhone: input.contactPhone ?? null,
     };
   });
 }

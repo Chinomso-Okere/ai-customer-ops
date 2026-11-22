@@ -452,6 +452,33 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
+    id: "emergency-contact-details",
+    title: "Gas leak outside the Coverage Area: the Customer's name and phone end up on the Emergency ticket",
+    covers: ["#25"],
+    steps: [
+      { customer: "I can smell gas in my flat in Manchester, M1 1AE!" },
+      { customer: "I'm outside now. My name is Priya Nair and you can call me on 07700 900123." },
+    ],
+    expect: [
+      prefilter("gas_or_co"),
+      oneTicket("Emergency", "Critical"),
+      called("create_handoff_ticket", { ok: true, where: (c) => c.input.reason === "Emergency" }),
+      ticketsInConversation(
+        (tickets) =>
+          tickets.some(
+            (t) =>
+              t.escalationReason === "Emergency" &&
+              t.contactName === "Priya Nair" &&
+              t.contactPhone === "+447700900123" &&
+              t.timeline.some((e) => e.kind === "appended"),
+          ),
+        "the Emergency ticket carries the Customer's name and phone, with an appended timeline event",
+      ),
+      neverSucceeded("propose_booking"),
+      noNewJobs(),
+    ],
+  },
+  {
     id: "flood-emergency-visit",
     title: "Flood: Safety Script + Critical ticket, then an Emergency Visit is booked",
     covers: ["#4", "#13"],

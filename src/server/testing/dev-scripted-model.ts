@@ -203,6 +203,21 @@ function startTurn(ctx: RequestContext): ModelResponse {
     return reply([text("No problem, I haven't booked anything. Tell me what you'd like to change, or ask for other times.")]);
   }
 
+  // 1b. After an Emergency, a phone number is for the callback: attach it to the open Emergency ticket.
+  const phone = PHONE.exec(now)?.[0];
+  if (phone && emergencyShown(ctx.messages)) {
+    return reply([
+      toolCall("create_handoff_ticket", {
+        reason: "Emergency",
+        summary: "The Customer gave contact details for the callback.",
+        recommendedNextStep: "Call the Customer now.",
+        jobReference: null,
+        customerName: ctx.details.fullName ?? null,
+        customerPhone: phone.trim(),
+      }),
+    ]);
+  }
+
   // 2. Complaints and requests Apex can't grant go to a person.
   if (COMPLAINT.test(now)) {
     const reason = /(refund|compensation|discount)/i.test(now) ? "Out of Policy" : "Complaint";
@@ -227,6 +242,15 @@ function startTurn(ctx: RequestContext): ModelResponse {
       "Hi, I'm Apex (scripted dev mode). I can quote prices, check Availability and book a Visit, or look up one of your Jobs. What would you like to do?",
     ),
   ]);
+}
+
+const PHONE = /(?:\+|\b)\d[\d\s().-]{8,}\d/;
+
+/** The Emergency pre-filter fired earlier in this conversation (it leaves a note in the history). */
+function emergencyShown(messages: readonly BetaMessageParam[]): boolean {
+  return messages.some(
+    (m) => m.role === "assistant" && JSON.stringify(m.content).includes("Emergency pre-filter fired"),
+  );
 }
 
 /** The latest proposal not yet confirmed or superseded by a later one. */
@@ -420,6 +444,15 @@ function afterTool(run: ToolRun, ctx: RequestContext): ModelResponse {
     case "get_job_details":
       return reply([text(describeJob(data))]);
     case "create_handoff_ticket":
+      if (run.input.reason === "Emergency") {
+        return reply([
+          text(
+            data.contactStillNeeded
+              ? `Thanks. I still need your name and a phone number to pass on (Handoff Ticket ${data.ticketReference}).`
+              : `Thank you. I've added your details to Handoff Ticket ${data.ticketReference} and the Apex team will call you.`,
+          ),
+        ]);
+      }
       return reply([
         text(`I'm sorry about that. I've passed this to the Apex team (Handoff Ticket ${data.ticketReference}) and someone will follow up with you.`),
       ]);

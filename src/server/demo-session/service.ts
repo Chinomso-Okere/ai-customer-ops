@@ -43,7 +43,7 @@ export const DEMO_SESSION_TTL_MS = 4 * 60 * 60 * 1000;
 export const MAX_CUSTOMER_MESSAGE_LENGTH = 2000;
 
 /** Abuse guardrail: new Demo Sessions one client IP may start per rolling hour. */
-export const MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR = 3;
+export const MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR = 10;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 export interface NewDemoSessionOptions {
@@ -57,10 +57,19 @@ export interface NewDemoSessionOptions {
  */
 export interface DemoSessionService {
   /**
-   * Starts a new Demo Session seeded relative to the clock's "now". Reset = call this again.
+   * Starts a new Demo Session seeded relative to the clock's "now".
    * @throws DemoSessionRateLimitedError past MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR for `clientIp`
    */
   createDemoSession(options?: NewDemoSessionOptions): Promise<string>;
+  /**
+   * "Reset demo": deletes the caller's own Demo Session `sessionId` (the one in
+   * their cookie, never one found by IP) with all its data, then starts a new
+   * one, in one transaction. The old session no longer counts toward the
+   * per-IP limit, so resets never hit it. An unknown `sessionId` (or none)
+   * deletes nothing and starts a new one like createDemoSession.
+   * @throws DemoSessionRateLimitedError only when nothing was deleted and the IP is at the limit
+   */
+  resetDemoSession(sessionId: string | undefined, options?: NewDemoSessionOptions): Promise<string>;
   /**
    * Resumes `sessionId` if it is live; otherwise starts a new Demo Session.
    * @throws DemoSessionRateLimitedError (only when it would start a new one)
@@ -179,30 +188,48 @@ export function createDemoSessionService(deps: DemoSessionServiceDeps): DemoSess
     return startedAt;
   }
 
+  /**
+   * Starts a new Demo Session. When `replacing` is given, deletes that session
+   * (cascading to all its data) in the same transaction, before the rate limit
+   * is checked, so a refusal rolls the delete back.
+   */
+  async function startDemoSession(replacing: string | undefined, options?: NewDemoSessionOptions): Promise<string> {
+    const now = clock.now();
+    const sessionId = crypto.randomUUID();
+    const ipHash = options?.clientIp ? hashClientIp(options.clientIp) : null;
+    await db.transaction(async (tx) => {
+      if (ipHash) {
+        // Serialise creations per IP so concurrent requests can't all slip under the limit.
+        await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [ipHash]);
+      }
+      if (replacing && UUID.test(replacing)) {
+        await tx.query("DELETE FROM demo_session WHERE id = $1", [replacing]);
+      }
+      if (ipHash) {
+        const { rows } = await tx.query<{ n: string }>(
+          "SELECT count(*) AS n FROM demo_session WHERE client_ip_hash = $1 AND created_at > $2",
+          [ipHash, new Date(now.getTime() - RATE_LIMIT_WINDOW_MS)],
+        );
+        if (Number(rows[0]!.n) >= MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR) {
+          throw new DemoSessionRateLimitedError();
+        }
+      }
+      await tx.query(
+        "INSERT INTO demo_session (id, created_at, expires_at, client_ip_hash) VALUES ($1, $2, $3, $4)",
+        [sessionId, now, new Date(now.getTime() + DEMO_SESSION_TTL_MS), ipHash],
+      );
+      await seedWorld(tx, sessionId, now);
+    });
+    return sessionId;
+  }
+
   const service: DemoSessionService = {
     async createDemoSession(options) {
-      const now = clock.now();
-      const sessionId = crypto.randomUUID();
-      const ipHash = options?.clientIp ? hashClientIp(options.clientIp) : null;
-      await db.transaction(async (tx) => {
-        if (ipHash) {
-          // Serialise creations per IP so concurrent requests can't all slip under the limit.
-          await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [ipHash]);
-          const { rows } = await tx.query<{ n: string }>(
-            "SELECT count(*) AS n FROM demo_session WHERE client_ip_hash = $1 AND created_at > $2",
-            [ipHash, new Date(now.getTime() - RATE_LIMIT_WINDOW_MS)],
-          );
-          if (Number(rows[0]!.n) >= MAX_NEW_DEMO_SESSIONS_PER_IP_PER_HOUR) {
-            throw new DemoSessionRateLimitedError();
-          }
-        }
-        await tx.query(
-          "INSERT INTO demo_session (id, created_at, expires_at, client_ip_hash) VALUES ($1, $2, $3, $4)",
-          [sessionId, now, new Date(now.getTime() + DEMO_SESSION_TTL_MS), ipHash],
-        );
-        await seedWorld(tx, sessionId, now);
-      });
-      return sessionId;
+      return startDemoSession(undefined, options);
+    },
+
+    async resetDemoSession(sessionId, options) {
+      return startDemoSession(sessionId, options);
     },
 
     async openDemoSession(sessionId, options) {

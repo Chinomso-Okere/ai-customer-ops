@@ -18,7 +18,7 @@ export type ChatMessageKind =
   | "message_cap"
   /** The fixed Safety Script for an Emergency; payload `{ emergencyKind, title, bullets }`. */
   | "safety_script"
-  /** A fixed notice that a Handoff Ticket was raised or updated; payload `{ ticketReference, isNewTicket }`. */
+  /** A fixed notice that a Handoff Ticket was raised or updated; payload `{ ticketReference, isNewTicket, contactNeeded }`. */
   | "handoff_notice";
 
 /** One message of the Customer-visible transcript. JSON-safe. */
@@ -111,6 +111,8 @@ export type ToolErrorCode =
   | "not_verified"
   /** The chat already has a Customer (#27) and these details are not theirs. */
   | "one_customer_per_chat"
+  /** A phone number that is not a UK number (see `normaliseUkPhone`). */
+  | "invalid_phone"
   /** Set by the runner: this exact call already failed the same way in this turn. */
   | "repeated_failed_call";
 

@@ -167,7 +167,7 @@ export function ChatWidget({
             {startingNewDemo ? "Starting a new demo…" : "Start a new demo"}
           </button>
         )}
-        {capped && notice && (
+        {notice && (
           <p className="banner banner--notice" role="status">
             {notice}
           </p>
