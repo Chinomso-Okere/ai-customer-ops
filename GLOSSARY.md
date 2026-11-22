@@ -90,12 +90,16 @@ _Avoid_: Consent, approval
 Proving a Customer's identity before the Agent reveals Job details: either Job Reference plus postcode or email, or full name plus postcode plus email.
 _Avoid_: Login, authentication
 
+**Chat's Customer**:
+The one Customer a conversation is about, set by the conversation's first successful Verification or Booking. After that the Agent only verifies, and only books for, that Customer; anyone else needs a New chat. An Emergency Visit is the exception: it is never refused for who it is for, and does not set the chat's Customer.
+_Avoid_: Session user, account
+
 **Escalation**:
 The Agent stopping its own handling of a topic and passing it to an Operator.
 _Avoid_: Transfer, handover
 
 **Handoff Ticket**:
-The structured record of an Escalation (Customer details, conversation summary, urgency, recommended next step) that Operators acknowledge and resolve.
+The structured record of an Escalation (Customer details and, once given, the callback name and phone; conversation summary, urgency, recommended next step) that Operators acknowledge and resolve.
 _Avoid_: Ticket (alone), case, support request
 
 **Escalation Reason**:

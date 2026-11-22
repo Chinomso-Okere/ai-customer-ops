@@ -1,6 +1,6 @@
 import { describeWindow } from "@/server/scheduling/availability";
 import { proposeAction } from "../confirmation";
-import type { CancellationPayload } from "../confirmation/visit-changes";
+import { cancellationAction, type CancellationPayload } from "../confirmation/visit-changes";
 import type { AgentTool } from "../types";
 import { visitChangeableInChat } from "../visit-change-checks";
 
@@ -29,15 +29,11 @@ export const proposeCancellation: AgentTool = {
       timeWindow: visit.timeWindow,
       label: describeWindow(visit),
     };
-    const pendingActionId = await proposeAction(ctx, { kind: "cancellation", payload, readBack });
-    return {
-      ok: true,
-      result: {
-        pendingActionId,
-        readBack,
-        guidance:
-          "Nothing has changed yet. Read back the Visit being cancelled and ask the Customer to confirm. Call confirm_action only after they agree.",
-      },
-    };
+    return proposeAction(ctx, cancellationAction, {
+      payload,
+      readBack,
+      guidance:
+        "Nothing has changed yet. Read back the Visit being cancelled and ask the Customer to confirm. Call confirm_action only after they agree.",
+    });
   },
 };

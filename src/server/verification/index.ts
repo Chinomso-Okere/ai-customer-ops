@@ -7,13 +7,22 @@
  *
  * Matching ignores case and whitespace; postcodes are compared with spaces
  * removed. No fuzzy name matching. 3 failed attempts lock Verification for the
- * conversation; once verified, the Customer stays verified for it.
+ * conversation, verified or not (a locked conversation loses its verified
+ * access too); otherwise a verified Customer stays verified for it.
+ *
+ * One chat is about one Customer (#27): the first successful Verification or
+ * Booking in a conversation sets its Customer, and from then on only that
+ * Customer can be verified. Details for anyone else are refused exactly like
+ * garbage details (the `otherCustomer` outcome), so the refusal never reveals
+ * whether another Customer matches.
  *
  * Other tools that reveal or change a Customer's data (reschedule, cancel,
  * parts fitting) must gate on `isVerifiedForJob` / `getVerification`.
  */
 import { normalisePostcode } from "@/domain/coverage-area";
+import { normaliseEmail, normaliseName } from "@/domain/customer-identity";
 import type { JobStatus } from "@/domain/vocabulary";
+import { getChatCustomerId, setChatCustomerIfUnset } from "@/server/chat-customer";
 import type { Database } from "@/server/db/database";
 
 export const MAX_VERIFICATION_ATTEMPTS = 3;
@@ -55,18 +64,15 @@ export type VerificationOutcome =
       alreadyVerified: boolean;
     }
   | { kind: "failed"; attemptsRemaining: number; locked: boolean }
+  /**
+   * The conversation already has a Customer and these details did not match
+   * them (valid for someone else, or just wrong: callers cannot tell which).
+   * An attempt is used, as for `failed`.
+   */
+  | { kind: "otherCustomer"; attemptsRemaining: number; locked: boolean }
   | { kind: "locked" }
   /** Neither path's details are complete; no attempt is used. */
   | { kind: "incomplete"; missing: string };
-
-/** "Sarah  MITCHELL " → "sarah mitchell". */
-export function normaliseName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-export function normaliseEmail(email: string): string {
-  return email.replace(/\s+/g, "").toLowerCase();
-}
 
 /**
  * SQL that is true when `column` holds the email in `param` (already passed
@@ -91,19 +97,20 @@ export async function getVerification(db: Database, ref: ConversationRef): Promi
       WHERE session_id = $1 AND conversation_id = $2`,
     [ref.sessionId, ref.conversationId],
   );
-  const verifiedCustomerId = rows[0]?.verified_customer_id ?? null;
   const failedAttempts = rows[0]?.failed_attempts ?? 0;
+  const locked = failedAttempts >= MAX_VERIFICATION_ATTEMPTS;
   return {
-    verifiedCustomerId,
+    // A locked conversation is verified for nobody.
+    verifiedCustomerId: locked ? null : (rows[0]?.verified_customer_id ?? null),
     failedAttempts,
     attemptsRemaining: Math.max(0, MAX_VERIFICATION_ATTEMPTS - failedAttempts),
-    locked: verifiedCustomerId === null && failedAttempts >= MAX_VERIFICATION_ATTEMPTS,
+    locked,
   };
 }
 
 /**
- * The Job's id if this conversation is verified for the Customer who owns it,
- * else null. `jobReference` may be in any case/spacing.
+ * The Job's id if this conversation is verified for the Customer who owns it
+ * (and not locked), else null. `jobReference` may be in any case/spacing.
  */
 export async function verifiedJobId(
   db: Database,
@@ -114,8 +121,9 @@ export async function verifiedJobId(
     `SELECT j.id
        FROM conversation_verification v
        JOIN job j ON j.session_id = v.session_id AND j.customer_id = v.verified_customer_id
-      WHERE v.session_id = $1 AND v.conversation_id = $2 AND j.job_reference = $3`,
-    [ref.sessionId, ref.conversationId, normaliseJobReference(jobReference)],
+      WHERE v.session_id = $1 AND v.conversation_id = $2 AND j.job_reference = $3
+        AND v.failed_attempts < $4`,
+    [ref.sessionId, ref.conversationId, normaliseJobReference(jobReference), MAX_VERIFICATION_ATTEMPTS],
   );
   return rows[0]?.id ?? null;
 }
@@ -143,19 +151,22 @@ export async function attemptVerification(
   const email = present(details.email);
   const fullName = present(details.fullName);
 
-  if (state.verifiedCustomerId) {
-    return verified(db, ref.sessionId, state.verifiedCustomerId, jobReference, true);
-  }
   if (state.locked) return { kind: "locked" };
 
-  let match: { customerId: string; jobReference: string | null } | null;
-  if (jobReference && (postcode || email)) {
-    match = await matchPathA(db, ref.sessionId, jobReference, postcode, email);
-  } else if (fullName && postcode && email) {
-    match = await matchPathB(db, ref.sessionId, fullName, postcode, email);
-  } else {
+  const usePathA = jobReference !== null && (postcode !== null || email !== null);
+  const usePathB = !usePathA && fullName !== null && postcode !== null && email !== null;
+  if (!usePathA && !usePathB) {
+    // Nothing to check: a verified Customer just gets their summary again.
+    if (state.verifiedCustomerId) return verified(db, ref.sessionId, state.verifiedCustomerId, jobReference, true);
     return { kind: "incomplete", missing: missingDetails(jobReference, postcode, email, fullName) };
   }
+
+  // Once the chat has a Customer, only that Customer can match: the other
+  // Customers are never looked up.
+  const chatCustomerId = (await getChatCustomerId(db, ref)) ?? state.verifiedCustomerId;
+  const match = usePathA
+    ? await matchPathA(db, ref.sessionId, jobReference!, postcode, email, chatCustomerId)
+    : await matchPathB(db, ref.sessionId, fullName!, postcode!, email!, chatCustomerId);
 
   if (match) {
     await db.query(
@@ -165,7 +176,8 @@ export async function attemptVerification(
          WHERE conversation_verification.session_id = $1`,
       [ref.sessionId, ref.conversationId, match.customerId, now],
     );
-    return verified(db, ref.sessionId, match.customerId, match.jobReference, false);
+    await setChatCustomerIfUnset(db, ref, match.customerId);
+    return verified(db, ref.sessionId, match.customerId, match.jobReference, state.verifiedCustomerId === match.customerId);
   }
 
   const { rows } = await db.query<{ failed_attempts: number }>(
@@ -179,7 +191,11 @@ export async function attemptVerification(
   );
   const failedAttempts = rows[0]!.failed_attempts;
   const attemptsRemaining = Math.max(0, MAX_VERIFICATION_ATTEMPTS - failedAttempts);
-  return { kind: "failed", attemptsRemaining, locked: attemptsRemaining === 0 };
+  return {
+    kind: chatCustomerId ? "otherCustomer" : "failed",
+    attemptsRemaining,
+    locked: attemptsRemaining === 0,
+  };
 }
 
 function present(value: string | undefined): string | null {
@@ -203,13 +219,14 @@ async function matchPathA(
   jobReference: string,
   postcode: string | null,
   email: string | null,
+  onlyCustomerId: string | null,
 ): Promise<{ customerId: string; jobReference: string } | null> {
   const { rows } = await db.query<{ customer_id: string; job_reference: string; postcode: string; email: string }>(
     `SELECT j.customer_id, j.job_reference, c.postcode, c.email
        FROM job j
        JOIN customer c ON c.id = j.customer_id AND c.session_id = j.session_id
-      WHERE j.session_id = $1 AND j.job_reference = $2`,
-    [sessionId, normaliseJobReference(jobReference)],
+      WHERE j.session_id = $1 AND j.job_reference = $2 AND ($3::uuid IS NULL OR j.customer_id = $3::uuid)`,
+    [sessionId, normaliseJobReference(jobReference), onlyCustomerId],
   );
   const row = rows[0];
   if (!row) return null;
@@ -225,13 +242,14 @@ async function matchPathB(
   fullName: string,
   postcode: string,
   email: string,
+  onlyCustomerId: string | null,
 ): Promise<{ customerId: string; jobReference: null } | null> {
   const { rows } = await db.query<{ id: string; full_name: string; postcode: string; email: string }>(
     `SELECT id, full_name, postcode, email
        FROM customer
-      WHERE session_id = $1 AND ${sqlEmailEquals("email", "$2")}
+      WHERE session_id = $1 AND ${sqlEmailEquals("email", "$2")} AND ($3::uuid IS NULL OR id = $3::uuid)
       ORDER BY created_at, id`,
-    [sessionId, normaliseEmail(email)],
+    [sessionId, normaliseEmail(email), onlyCustomerId],
   );
   const match = rows.find(
     (c) =>

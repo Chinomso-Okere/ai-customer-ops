@@ -53,6 +53,33 @@ describe("Gas/CO Emergency: no booking until an Operator resolves the ticket", (
     expect(confirmed.ok).toBe(true);
   });
 
+  it("the block covers the whole Demo Session: a New chat does not escape it", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "I think I smell gas in the kitchen");
+    const second = { ...h, conversationId: await h.service.openConversation(h.sessionId, undefined) };
+
+    const blocked = await proposeFirstWindow(second);
+    expect(blocked.availability.ok).toBe(false);
+    expect(blocked.proposal.ok).toBe(false);
+
+    const ticket = await openEmergencyTicket(h);
+    await h.service.resolveHandoffTicket(h.sessionId, ticket.id);
+    expect((await proposeFirstWindow(second)).proposal.ok).toBe(true);
+  });
+
+  it("a booking proposed in a New chat can't be confirmed once a gas Emergency opens in another chat", async () => {
+    const h = await chatHarness(WEDNESDAY_0930);
+    const second = { ...h, conversationId: await h.service.openConversation(h.sessionId, undefined) };
+    const { proposal } = await proposeFirstWindow(second);
+    if (!proposal.ok) throw new Error(proposal.error);
+    await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "hang on, the CO alarm is going off");
+
+    const confirmed = await toolTurn(second, "ok, yes book it", "confirm_action", {
+      pendingActionId: proposal.result.pendingActionId,
+    });
+    expect(confirmed.ok).toBe(false);
+  });
+
   it("a booking proposed before the gas Emergency can't be confirmed while it is unresolved", async () => {
     const h = await chatHarness(WEDNESDAY_0930);
     const before = await h.service.getDashboardState(h.sessionId);
@@ -123,10 +150,10 @@ describe("Gas/CO Emergency: no booking until an Operator resolves the ticket", (
     );
   });
 
-  it("the block is per conversation, and a flood Emergency doesn't block normal booking", async () => {
+  it("a flood Emergency doesn't block normal booking, in its own chat or another", async () => {
     const h = await chatHarness(WEDNESDAY_0930);
-    const gasConversation = await h.service.openConversation(h.sessionId, crypto.randomUUID());
-    await h.service.sendCustomerMessage(h.sessionId, gasConversation, "gas leak!");
+    const floodConversation = await h.service.openConversation(h.sessionId, crypto.randomUUID());
+    await h.service.sendCustomerMessage(h.sessionId, floodConversation, "water pouring from the ceiling");
     await h.service.sendCustomerMessage(h.sessionId, h.conversationId, "water pouring from the ceiling");
 
     const { proposal } = await proposeFirstWindow(h);

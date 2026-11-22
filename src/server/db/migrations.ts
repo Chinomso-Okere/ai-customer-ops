@@ -257,6 +257,24 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
       ALTER TABLE handoff_ticket ADD COLUMN emergency_kind text;
     `,
   },
+  {
+    id: "0010_t25_handoff_ticket_contact",
+    sql: `
+      -- Who to call back and on what number, once the Customer has given them in
+      -- chat (an Emergency asks for both). contact_phone is stored normalised
+      -- ("+447700900123"). NULL until known.
+      ALTER TABLE handoff_ticket ADD COLUMN contact_name text, ADD COLUMN contact_phone text;
+    `,
+  },
+  {
+    id: "0011_t27_chat_customer",
+    sql: `
+      -- The one Customer a chat is about (#27): set by the first successful
+      -- Verification or Booking in the conversation. NULL until then.
+      ALTER TABLE conversation
+        ADD COLUMN customer_id uuid REFERENCES customer(id) ON DELETE SET NULL;
+    `,
+  },
 ];
 
 // Arbitrary constant key so concurrent cold starts don't migrate twice.

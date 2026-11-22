@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { contactStillNeeded } from "@/domain/callback-contact";
 import type { ChatMessage, DashboardHandoffTicket } from "@/server/demo-session";
 import { formatAge, slug } from "./format";
 
@@ -50,6 +51,7 @@ export function HandoffTicketQueue({
                     {t.jobReference ? ` · ${t.jobReference}` : ""}
                     {appendedCount(t) > 0 ? ` · ${appendedCount(t)} follow-up message(s)` : ""}
                   </span>
+                  <span className="ticket__meta">{contactLine(t)}</span>
                 </button>
                 <p className="ticket__next">
                   <strong>Next step:</strong> {t.recommendedNextStep}
@@ -62,6 +64,13 @@ export function HandoffTicketQueue({
       )}
     </section>
   );
+}
+
+/** Who to call back, as far as the Customer has said; shown in the queue and in the ticket detail. */
+function contactLine(t: DashboardHandoffTicket): string {
+  const known = [t.contactName, t.contactPhone].filter(Boolean);
+  if (known.length === 0) return "No contact details yet";
+  return `Contact: ${known.join(" · ")}${contactStillNeeded(t) ? " (a callback needs both a name and a phone)" : ""}`;
 }
 
 function appendedCount(t: DashboardHandoffTicket): number {
@@ -113,6 +122,7 @@ function TicketDetail({ ticket, onChanged }: { ticket: DashboardHandoffTicket; o
 
   return (
     <div className="ticket__detail">
+      <p className="ticket__contact">{contactLine(ticket)}</p>
       <div className="ticket__actions">
         <button
           type="button"

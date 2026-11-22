@@ -15,9 +15,10 @@ between them.
 
 ## Add a pending-action kind (two-phase Confirmation)
 
-A write tool never writes. It validates, calls `proposeAction(ctx, { kind,
-payload, readBack })` and returns the read-back; `confirm_action` runs the write
-once a later Customer message arrives.
+A write tool never writes. It validates, then returns `proposeAction(ctx, kind,
+{ payload, readBack, guidance })`, which records the proposal and yields the
+outcome with the read-back; `confirm_action` runs the write once a later
+Customer message arrives.
 
 1. Define a `PendingActionKind` (`src/server/agent/confirmation/pending-actions.ts`)
    in its own file beside `booking.ts`, and list it in `PENDING_ACTION_KINDS`
@@ -27,8 +28,16 @@ once a later Customer message arrives.
    back every write.
 3. Set `allowedDuringGasEmergency: true` only for a write that books nothing (a
    cancellation). Every other kind is refused while a gas/CO Emergency ticket is
-   open. Wrap its propose tool in `blockedDuringGasEmergency(...)` in
+   open anywhere in the Demo Session (a New chat does not escape it). Wrap its propose tool in `blockedDuringGasEmergency(...)` in
    `tools/index.ts` unless the kind has that exemption.
+4. Set `bindsChatCustomer: true` for a write that creates or uses a Customer
+   from details the Customer typed (only `booking`). `proposeAction` and
+   `confirm_action` then refuse details naming someone other than the chat's
+   Customer (`one_customer_per_chat`, #27) and, once the write succeeds, make
+   its Customer the chat's (`src/server/chat-customer`). The payload must carry
+   `fullName`, `postcode` and `email`. Don't set it on writes for an already
+   verified Job, nor on `emergency_visit`: an Emergency Visit is never refused
+   for who it is for.
 
 ## Add a chat reply kind
 
@@ -55,6 +64,21 @@ Per `README.md`, queue it with `ctx.enqueueSystemNote(text)`. When the server
 must also refuse (not just advise), enforce the rule in code, as
 `gasEmergencyBookingBlock` does (`src/server/agent/emergency.ts`): the note is
 advice, the block is the guarantee.
+
+## Add detail to an open Handoff Ticket
+
+Later facts reach an open ticket through the same `create_handoff_ticket` call
+(a repeat with the same reason appends; no second tool). Contact details are the
+example: `customerName` and `customerPhone` (required, nullable) fill
+`handoff_ticket.contact_name` / `contact_phone` via `raiseHandoffTicket`, which
+only ever fills a missing value, and the timeline gets an `appended` event. A
+phone goes through `normaliseUkPhone` (`src/domain/uk-phone.ts`) and junk is
+refused with `code: "invalid_phone"`, nothing saved.
+
+The fixed Emergency notice reads the ticket afterwards: its `handoff_notice`
+payload carries `contactNeeded`, which is true until both fields are set, so a
+repeat Emergency message asks again. Wording stays in code
+(`emergencyNotice` in `hooks/emergency-prefilter.ts`); tests assert the payload.
 
 ## Test helpers
 

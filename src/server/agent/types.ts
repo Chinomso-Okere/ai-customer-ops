@@ -18,7 +18,7 @@ export type ChatMessageKind =
   | "message_cap"
   /** The fixed Safety Script for an Emergency; payload `{ emergencyKind, title, bullets }`. */
   | "safety_script"
-  /** A fixed notice that a Handoff Ticket was raised or updated; payload `{ ticketReference, isNewTicket }`. */
+  /** A fixed notice that a Handoff Ticket was raised or updated; payload `{ ticketReference, isNewTicket, contactNeeded }`. */
   | "handoff_notice";
 
 /** One message of the Customer-visible transcript. JSON-safe. */
@@ -109,6 +109,10 @@ export type ToolOutcome =
 export type ToolErrorCode =
   | "outside_coverage_area"
   | "not_verified"
+  /** The chat already has a Customer (#27) and these details are not theirs. */
+  | "one_customer_per_chat"
+  /** A phone number that is neither a UK number nor a "+" international one (see `normaliseCallbackPhone`). */
+  | "invalid_phone"
   /** Set by the runner: this exact call already failed the same way in this turn. */
   | "repeated_failed_call";
 
@@ -118,6 +122,17 @@ export const TOOL_ERRORS = {
     ok: false,
     code: "not_verified",
     error: "The Customer is not verified in this conversation. Call verify_customer first.",
+  },
+  /**
+   * One chat is about one Customer (#27). Used for a Verification that did not
+   * match the chat's Customer and for a Booking naming someone else; the
+   * wording must never say whether the details belong to anyone.
+   */
+  oneCustomerPerChat: {
+    ok: false,
+    code: "one_customer_per_chat",
+    error:
+      "Refused: these details can't be used in this chat, which can only help with one Customer. Ask the Customer to check what they typed for typos. If it is someone else's Job, ask them to start a new chat (the New chat button) for it. Do not say whether the details they gave belong to anyone.",
   },
   outsideCoverageArea: (outwardCode: string) => ({
     ok: false as const,

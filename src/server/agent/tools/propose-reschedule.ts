@@ -1,6 +1,6 @@
 import { describeWindow, parseWindow, requireAvailableWindow } from "@/server/scheduling/availability";
 import { proposeAction } from "../confirmation";
-import type { ReschedulePayload } from "../confirmation/visit-changes";
+import { rescheduleAction, type ReschedulePayload } from "../confirmation/visit-changes";
 import type { AgentTool } from "../types";
 import { visitChangeableInChat } from "../visit-change-checks";
 
@@ -41,15 +41,11 @@ export const proposeReschedule: AgentTool = {
       from: { ...from, label: describeWindow(from) },
       to: { ...window, label: describeWindow(window) },
     };
-    const pendingActionId = await proposeAction(ctx, { kind: "reschedule", payload, readBack });
-    return {
-      ok: true,
-      result: {
-        pendingActionId,
-        readBack,
-        guidance:
-          "Nothing has changed yet. Read back the Visit's current and new date and Time Window and ask the Customer to confirm. Call confirm_action only after they agree.",
-      },
-    };
+    return proposeAction(ctx, rescheduleAction, {
+      payload,
+      readBack,
+      guidance:
+        "Nothing has changed yet. Read back the Visit's current and new date and Time Window and ask the Customer to confirm. Call confirm_action only after they agree.",
+    });
   },
 };

@@ -146,6 +146,18 @@ describe("Eval scenarios pass for an Agent that does the right thing", () => {
     expect(result.facts.filter((f) => !f.ok)).toEqual([]);
   });
 
+  it("one-customer-per-chat", async () => {
+    const jamesRef = refOf("James Patel", "Scheduled");
+    const agent = playedAgent({
+      0: [["get_availability", { issueType: "Boiler Service", postcode: BOOKING.postcode }]],
+      1: [["propose_booking", (r) => ({ ...BOOKING, ...firstWindow(r) })]],
+      2: [confirmLatest("propose_booking")],
+      3: [["verify_customer", { jobReference: jamesRef, postcode: "SE15 4QF" }]],
+    });
+    const result = await runScenario(scenario("one-customer-per-chat"), { modelClient: agent });
+    expect(result.facts.filter((f) => !f.ok)).toEqual([]);
+  });
+
   it("operator-advances-part-to-arrived", async () => {
     const ref = refOf("Sarah Mitchell", "Awaiting Parts");
     const agent = playedAgent({
@@ -269,6 +281,9 @@ describe("Eval scenarios pass for an Agent that does the right thing", () => {
       0: [["create_handoff_ticket", { reason: "Complaint", summary: "Engineer late and messy.", recommendedNextStep: "Call the Customer." }]],
     })],
     ["off-topic-refusal", () => ({ 0: [["refuse_off_topic", {}]] })],
+    ["emergency-contact-details", () => ({
+      1: [["create_handoff_ticket", { reason: "Emergency", summary: "Contact details for the callback.", recommendedNextStep: "Call the Customer.", customerName: "Priya Nair", customerPhone: "07700 900123" }]],
+    })],
   ];
 
   it.each(played)("%s", async (id, plan) => {
@@ -279,7 +294,7 @@ describe("Eval scenarios pass for an Agent that does the right thing", () => {
   it("every scenario has a played-Agent check above", () => {
     const covered = new Set([
       ...played.map(([id]) => id),
-      "booking-happy-path", "natural-language-confirmation", "existing-email-booking", "verification-lockout",
+      "booking-happy-path", "natural-language-confirmation", "existing-email-booking", "verification-lockout", "one-customer-per-chat",
       "operator-advances-part-to-arrived", "reschedule-over-24h", "late-cancellation-out-of-policy",
       "duplicate-ticket-suppression", "flood-emergency-visit", "gas-leak-booking-blocked",
     ]);

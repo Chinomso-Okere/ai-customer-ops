@@ -2,7 +2,7 @@ import { formatPostcode, isInCoverageArea, normalisePostcode, outwardCode } from
 import { ISSUE_TYPES, parseIssueType, type IssueType } from "@/domain/vocabulary";
 import { describeWindow, parseWindow, requireAvailableWindow } from "@/server/scheduling/availability";
 import { proposeAction } from "../confirmation";
-import type { BookingPayload } from "../confirmation/booking";
+import { bookingAction, type BookingPayload } from "../confirmation/booking";
 import { TOOL_ERRORS, type AgentTool, type ToolOutcome } from "../types";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -28,7 +28,7 @@ export const proposeBooking: AgentTool = {
     additionalProperties: false,
   },
   promptGuidance:
-    "To Book: collect full name, postcode, Issue Type and email (phone optional), call get_availability and offer its windows (never invent dates), then call propose_booking with the chosen window. If the Customer has already named a day or window, call get_availability with that day as fromDate; if their window is free, call propose_booking for it in the same turn rather than asking them to choose again. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm before calling confirm_action.",
+    "To Book: collect full name, postcode, Issue Type and email (phone optional), call get_availability and offer its windows (never invent dates), then call propose_booking with the chosen window. If the Customer has already named a day or window, call get_availability with that day as fromDate; if their window is free, call propose_booking for it in the same turn rather than asking them to choose again. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm before calling confirm_action. One chat is about one Customer: if propose_booking is refused with the errorCode one_customer_per_chat, tell the Customer this chat can only help with one Customer, ask them to check what they typed for typos, and, if the Booking is for someone else, to start a new chat for it. Never say whether the details they gave belong to anyone. More Jobs for the same Customer are fine.",
   async run(input, ctx) {
     const details = parseBookingDetails(input);
     if (!details.ok) return details;
@@ -58,16 +58,12 @@ export const proposeBooking: AgentTool = {
       email,
       phone,
     };
-    const pendingActionId = await proposeAction(ctx, { kind: "booking", payload, readBack });
-    return {
-      ok: true,
-      result: {
-        pendingActionId,
-        readBack,
-        guidance:
-          "Nothing is booked yet. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm. Call confirm_action only after they agree.",
-      },
-    };
+    return proposeAction(ctx, bookingAction, {
+      payload,
+      readBack,
+      guidance:
+        "Nothing is booked yet. Read back the Issue Type, postcode, date and Time Window and ask the Customer to confirm. Call confirm_action only after they agree.",
+    });
   },
 };
 

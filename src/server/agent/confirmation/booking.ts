@@ -20,6 +20,7 @@ export interface BookingPayload {
 /** Book: a new Customer, a Scheduled Job and its first Visit. */
 export const bookingAction: PendingActionKind<BookingPayload> = {
   kind: "booking",
+  bindsChatCustomer: true,
   async execute(tx, ctx, p) {
     const window = { date: p.date, timeWindow: p.timeWindow };
     const booked = await bookJob(tx, ctx.sessionId, {

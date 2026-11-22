@@ -2,7 +2,7 @@ import { ISSUE_TYPES } from "@/domain/vocabulary";
 import { describeWindow } from "@/server/scheduling/availability";
 import { emergencyVisitWindow } from "@/server/scheduling/emergency-visit";
 import { proposeAction } from "../confirmation";
-import type { EmergencyVisitPayload } from "../confirmation/emergency-visit";
+import { emergencyVisitAction, type EmergencyVisitPayload } from "../confirmation/emergency-visit";
 import { openEmergency } from "../emergency";
 import type { AgentTool } from "../types";
 import { parseBookingDetails } from "./propose-booking";
@@ -64,15 +64,11 @@ export const proposeEmergencyVisit: AgentTool = {
       phone: details.phone,
       ticketReference: emergency.ticketReference,
     };
-    const pendingActionId = await proposeAction(ctx, { kind: "emergency_visit", payload, readBack });
-    return {
-      ok: true,
-      result: {
-        pendingActionId,
-        readBack,
-        guidance:
-          "Nothing is booked yet. Read back that this is an Emergency Visit, with the Issue Type, postcode, date and Time Window, and ask the Customer to confirm. Call confirm_action only after they agree.",
-      },
-    };
+    return proposeAction(ctx, emergencyVisitAction, {
+      payload,
+      readBack,
+      guidance:
+        "Nothing is booked yet. Read back that this is an Emergency Visit, with the Issue Type, postcode, date and Time Window, and ask the Customer to confirm. Call confirm_action only after they agree.",
+    });
   },
 };

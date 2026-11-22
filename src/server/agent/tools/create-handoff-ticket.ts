@@ -1,3 +1,5 @@
+import { contactStillNeeded } from "@/domain/callback-contact";
+import { normaliseCallbackPhone } from "@/domain/uk-phone";
 import { ESCALATION_REASONS, URGENCIES, type Urgency } from "@/domain/vocabulary";
 import { getVerification, verifiedJobId } from "@/server/verification";
 import { DEFAULT_URGENCY, raiseHandoffTicket } from "../handoff-tickets";
@@ -13,7 +15,7 @@ const QUOTE_LIMIT = 300;
 export const createHandoffTicket: AgentTool = {
   name: "create_handoff_ticket",
   description:
-    "Escalates to an Apex Operator by raising a Handoff Ticket. Call it when the Customer is angry or complaining (reason Complaint), or asks for something you may not grant: a refund, discount, compensation, or a price not on the Price List (reason Out of Policy). Call it again if they raise more about the same thing; it is added to the open ticket.",
+    "Escalates to an Apex Operator by raising a Handoff Ticket. Call it when the Customer is angry or complaining (reason Complaint), or asks for something you may not grant: a refund, discount, compensation, or a price not on the Price List (reason Out of Policy). Call it again if they raise more about the same thing; it is added to the open ticket. For an Emergency, call it again with reason Emergency and customerName and customerPhone as soon as the Customer gives them: they are attached to the open Emergency ticket.",
   inputSchema: {
     type: "object",
     properties: {
@@ -27,8 +29,17 @@ export const createHandoffTicket: AgentTool = {
       summary: { type: "string", description: "One or two sentences for the Operator: what happened and what the Customer wants." },
       recommendedNextStep: { type: "string", description: "What the Operator should do next." },
       jobReference: { type: "string", description: "The Job it concerns, if the Customer is verified for it." },
+      customerName: {
+        type: ["string", "null"],
+        description: "The Customer's name for the callback, if they gave it; otherwise null.",
+      },
+      customerPhone: {
+        type: ["string", "null"],
+        description:
+          "The Customer's phone number for the callback, exactly as they typed it, if they gave it; otherwise null.",
+      },
     },
-    required: ["reason", "summary", "recommendedNextStep"],
+    required: ["reason", "summary", "recommendedNextStep", "customerName", "customerPhone"],
     additionalProperties: false,
   },
   promptGuidance:
@@ -39,6 +50,16 @@ export const createHandoffTicket: AgentTool = {
     const summary = typeof input.summary === "string" ? input.summary.trim() : "";
     const recommendedNextStep = typeof input.recommendedNextStep === "string" ? input.recommendedNextStep.trim() : "";
     if (!summary || !recommendedNextStep) return { ok: false, error: "summary and recommendedNextStep are required." };
+    const contactName = typeof input.customerName === "string" && input.customerName.trim() ? input.customerName.trim() : null;
+    const rawPhone = typeof input.customerPhone === "string" ? input.customerPhone.trim() : "";
+    const contactPhone = rawPhone ? normaliseCallbackPhone(rawPhone) ?? null : null;
+    if (rawPhone && !contactPhone) {
+      return {
+        ok: false,
+        code: "invalid_phone",
+        error: "That doesn't look like a valid phone number (a UK number, or an international one starting with +). Ask the Customer to check it and give it again; nothing was saved.",
+      };
+    }
     const urgency = parseUrgency(input.urgency);
     if (urgency === "invalid") return { ok: false, error: `urgency must be one of: ${URGENCIES.join(", ")}.` };
     if (urgency && isLessUrgent(urgency, DEFAULT_URGENCY[reason])) {
@@ -63,7 +84,12 @@ export const createHandoffTicket: AgentTool = {
       recommendedNextStep,
       customerId: verifiedCustomerId,
       jobId,
-      timelineEntry: `Customer: ${ctx.customerMessage.text.slice(0, QUOTE_LIMIT)}`,
+      contactName,
+      contactPhone,
+      timelineEntry:
+        contactName || contactPhone
+          ? `Customer gave contact details: ${[contactName, contactPhone].filter(Boolean).join(", ")}`
+          : `Customer: ${ctx.customerMessage.text.slice(0, QUOTE_LIMIT)}`,
       now: ctx.now,
     });
 
@@ -73,6 +99,8 @@ export const createHandoffTicket: AgentTool = {
       );
     }
 
+    // An Emergency callback needs both a name and a number.
+    const needsContact = reason === "Emergency" && contactStillNeeded(ticket);
     return {
       ok: true,
       result: {
@@ -80,7 +108,10 @@ export const createHandoffTicket: AgentTool = {
         escalationReason: reason,
         urgency: ticket.urgency,
         ticketAction: ticket.isNew ? "created" : "appended",
-        guidance: `Tell the Customer a member of the Apex team will follow up, and quote ${ticket.ticketReference}. Do not act on this topic yourself.`,
+        contactStillNeeded: needsContact,
+        guidance: needsContact
+          ? `Ask the Customer for their name and a phone number so the Apex team can call them back, then call create_handoff_ticket again with reason Emergency and those details. Quote ${ticket.ticketReference}. Do not promise a callback until you have a number.`
+          : `Tell the Customer a member of the Apex team will follow up, and quote ${ticket.ticketReference}. Do not act on this topic yourself.`,
       },
     };
   },
